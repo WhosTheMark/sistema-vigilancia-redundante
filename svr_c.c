@@ -7,10 +7,41 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include "list.h"
 #define PUERTO 6666
 
-void readEvents(FILE *fd, int socketfd) {
+
+void sendEvents(int socketfd, struct list *eventList) {
+
+   char *event;
+
+   while (listSize(eventList) > 0) {
+
+      event = getElement(eventList);
+      errno = 0;
+      int numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
+      int numTries = 0;
+
+      if (numBytes == -1) {
+
+         //TODO errno = EPIPE para cuando hay un broken pipe, reestablecer la conexion
+
+         while (numBytes < 0 && numTries < 10) {
+
+            printf("Error sending message. Trying again...\n");
+
+            errno = 0;
+            numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
+
+            ++numTries;
+            sleep(1);
+         }
+      }
+   }
+}
+
+void readEvents(FILE *fd, int socketfd, struct list *eventList) {
 
    int numMsgs;
 
@@ -19,11 +50,9 @@ void readEvents(FILE *fd, int socketfd) {
    while (!endFile && numMsgs != 0) {
 
       int eventCode;
-      char eventMsg[40];
+      char *eventMsg;
 
       printf("Sending messages\n");
-      sprintf(eventMsg,"%d",numMsgs);
-      write(socketfd,eventMsg,strlen(eventMsg));
 
       while (!endFile && numMsgs != 0) {
 
@@ -32,23 +61,30 @@ void readEvents(FILE *fd, int socketfd) {
          time_t rawtime = time(NULL);
          struct tm *timeEvent = localtime(&rawtime);
 
+         eventMsg = calloc(40,sizeof(char));
          sprintf(eventMsg, "%d,%s", eventCode, asctime(timeEvent));
-         write(socketfd,eventMsg,strlen(eventMsg));
+         addElement(eventMsg,eventList);
 
          --numMsgs;
       }
+
+      sendEvents(socketfd,eventList);
 
       endFile = fscanf(fd, "%d", &numMsgs) == EOF;
       sleep(10);
    }
 
+   //ENVIAR LO QUE QUEDA
+
    fclose(fd);
 
    if (endFile) {
       printf("Format of file is incorrect.\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
    }
 }
+
+
 
 void connectionServer(int *socketfd, struct sockaddr_in serv_addr) {
 
@@ -71,7 +107,7 @@ void connectionServer(int *socketfd, struct sockaddr_in serv_addr) {
 
    if (numTries == -1) {
       printf("Connection to server failed.\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
    }
 }
 
@@ -81,7 +117,7 @@ void createSocket(int *socketfd, char *address) {
 
    if ((*socketfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
       printf("Error: Could not create socket. \n");
-      exit(-1);
+      exit(EXIT_FAILURE);
    }
 
    struct sockaddr_in serv_addr;
@@ -93,30 +129,34 @@ void createSocket(int *socketfd, char *address) {
    /* Convierte el ip de str a formato de bits */
    if(inet_pton(AF_INET, address, &serv_addr.sin_addr) <= 0){
       printf("inet_pton error occured\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
    }
 
    connectionServer(socketfd,serv_addr);
 }
 
-
+//svr_c -d <nombre_módulo_central> -p <puerto_svr_s> [-l <puerto_local>]
 int main(int arg, char *argv[]) {
 
    char *path = malloc(sizeof(char)*100);
-   path = "pruebas/msg1.txt";
-   FILE *fd = fopen("pruebas/msg1.txt","r");
+   path = "tests/msg1.txt";
+   FILE *fd = fopen(path,"r");
 
    if (fd == NULL) {
       printf("File %s cannot be opened.", path);
       perror("");
-      exit(-1);
+      exit(EXIT_FAILURE);
    }
 
    int socketfd = 0;
 
+
    createSocket(&socketfd,argv[1]);
 
-   readEvents(fd,socketfd);
+   struct list eventList;
+   initializeList(&eventList);
+
+   readEvents(fd,socketfd,&eventList);
 
    close(socketfd);
 

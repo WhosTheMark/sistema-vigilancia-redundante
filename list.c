@@ -1,5 +1,8 @@
-#include "list.h"
-#define SIZE 5
+#ifndef LIST_
+#define LIST_
+
+#include <stdlib.h>
+#define SIZE 1000
 
 struct list {
 
@@ -29,7 +32,7 @@ void addElement(char *element, struct list *l) {
       l->isFull = 1;
 }
 
-char *deleteElement(struct list *l) {
+char *getElement(struct list *l) {
 
    if (l->lower == l->upper && !l->isFull) {
 
@@ -78,3 +81,5 @@ int main () {
    printf("elem: %s\n", elem);
    return 0;
 }*/
+
+#endif
