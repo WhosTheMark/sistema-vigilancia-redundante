@@ -8,9 +8,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
-#define PUERTO 6666
-
-//svr_s -l <puerto_svr_s> -b <archivo_bitácora>
 
 void usage() {
 
@@ -125,9 +122,7 @@ int main(int argc, char *argv[]) {
 
    memset(buffer, '0', sizeof(buffer));
 
-   //NOTE cambiar PUERTO a portNum
-
-   createSocket(&listenfd,PUERTO);
+   createSocket(&listenfd,portNum);
 
    // Escucha por un cliente.
    listen(listenfd, 128);
