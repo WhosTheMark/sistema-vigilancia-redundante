@@ -10,7 +10,7 @@ list.o: list.c list.h
 	gcc -c list.c
 
 server: svr_s.o
-	gcc svr_s.o -o svr_s
+	gcc -pthread svr_s.o -o svr_s
 
 svr_s.o: svr_s.c
 	gcc -c svr_s.c

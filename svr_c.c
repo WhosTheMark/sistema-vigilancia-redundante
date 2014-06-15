@@ -74,78 +74,6 @@ void clientArguments(int argc, char *argv[], char *domain, char *remotePort, cha
    }
 }
 
-void sendEvents(int socketfd, struct list *eventList) {
-
-   char *event;
-
-   while (listSize(eventList) > 0) {
-
-      event = getElement(eventList);
-      errno = 0;
-      int numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
-      int numTries = 0;
-
-      if (numBytes == -1) {
-
-         //TODO errno = EPIPE para cuando hay un broken pipe, reestablecer la conexion
-
-         while (numBytes < 0 && numTries < 10) {
-
-            printf("Error sending message. Trying again...\n");
-
-            errno = 0;
-            numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
-
-            ++numTries;
-            sleep(1);
-         }
-      }
-   }
-}
-
-void readEvents(FILE *fd, int socketfd, struct list *eventList) {
-
-   int numMsgs;
-
-   int endFile = fscanf(fd, "%d", &numMsgs) == EOF;
-
-   while (!endFile && numMsgs != 0) {
-
-      int eventCode;
-      char *eventMsg;
-
-      printf("Sending messages\n");
-
-      while (!endFile && numMsgs != 0) {
-
-         endFile = fscanf(fd, "%d", &eventCode) == EOF;
-
-         time_t rawtime = time(NULL);
-         struct tm *timeEvent = localtime(&rawtime);
-
-         eventMsg = calloc(40,sizeof(char));
-         sprintf(eventMsg, "%d,%s", eventCode, asctime(timeEvent));
-         addElement(eventMsg,eventList);
-
-         --numMsgs;
-      }
-
-      sendEvents(socketfd,eventList);
-
-      endFile = fscanf(fd, "%d", &numMsgs) == EOF;
-      sleep(10);
-   }
-
-   //ENVIAR LO QUE QUEDA
-
-   fclose(fd);
-
-   if (endFile) {
-      printf("Format of file is incorrect.\n");
-      exit(EXIT_FAILURE);
-   }
-}
-
 void connectionServer(int *socketfd, struct sockaddr addr) {
 
    int numTries;
@@ -171,22 +99,6 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
    }
 }
 
-int portStrToNum(char *portStr) {
-
-   errno = 0;
-   char *endptr;
-   int port = strtol(portStr,&endptr,10);
-
-   if ((errno == ERANGE || (errno != 0 && port == 0)) || (endptr == portStr) ||
-      (*endptr != '\0') || (port < 1) || (port > USHRT_MAX)) {
-
-      printf("Invalid port number.\n");
-      exit(EXIT_FAILURE);
-   }
-
-   return port;
-}
-
 void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *addr) {
 
    //NOTE agregar archivo para eventos del ATM
@@ -203,7 +115,7 @@ void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *
    }
 
    if ((*sockfd = socket(servInfo->ai_family, servInfo->ai_socktype,
-        servInfo->ai_protocol)) == -1) {
+      servInfo->ai_protocol)) == -1) {
 
       printf("Error: could not create socket.\n");
       exit(EXIT_FAILURE);
@@ -211,6 +123,127 @@ void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *
 
    *addr = *(servInfo->ai_addr);
 }
+
+int sendEvents(int *socketfd, struct list *eventList) {
+
+   char *event;
+
+   while (listSize(eventList) > 0) {
+
+      event = getElement(eventList);
+      errno = 0;
+      int numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
+      int numTries = 0;
+
+      if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
+
+         printf("event: %s\n",event);
+         addElement(event,eventList);
+         return 0;
+      }
+
+      if (numBytes == -1) {
+
+
+         while (numBytes < 0 && numTries < 10) {
+
+            printf("Error sending message. Trying again...\n");
+
+            errno = 0;
+            numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
+
+            ++numTries;
+            sleep(1);
+         }
+
+         if (numTries == 10) {
+            addElement(event,eventList);
+
+         }
+      }
+   }
+
+   return 1;
+}
+
+int readEvents(FILE *fd, int socketfd, struct list *eventList) {
+
+   int numMsgs;
+
+   int endFile = fscanf(fd, "%d", &numMsgs) == EOF;
+   int successSending = 0;
+
+   while (!endFile && numMsgs != 0) {
+
+      int eventCode;
+      char *eventMsg;
+
+      printf("Sending messages\n");
+
+      while (!endFile && numMsgs != 0) {
+
+         endFile = fscanf(fd, "%d", &eventCode) == EOF;
+
+         time_t rawtime = time(NULL);
+         struct tm *timeEvent = localtime(&rawtime);
+
+         eventMsg = calloc(40,sizeof(char));
+         sprintf(eventMsg, "%2d,%s", eventCode, asctime(timeEvent));
+         addElement(eventMsg,eventList);
+
+         --numMsgs;
+      }
+
+      successSending = sendEvents(&socketfd,eventList);
+
+      if (!successSending) {
+         close(socketfd);
+         return 0;
+      }
+
+      endFile = fscanf(fd, "%d", &numMsgs) == EOF;
+      sleep(10);
+   }
+
+   int numTries;
+
+   for (numTries = 0; numTries < 20 && !successSending; ++numTries) {
+      successSending = sendEvents(&socketfd,eventList);
+   }
+
+   if (!successSending) {
+      close(socketfd);
+      return 0;
+   }
+
+   fclose(fd);
+
+   if (endFile) {
+      printf("Format of file is incorrect.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   return 1;
+}
+
+
+
+int portStrToNum(char *portStr) {
+
+   errno = 0;
+   char *endptr;
+   int port = strtol(portStr,&endptr,10);
+
+   if ((errno == ERANGE || (errno != 0 && port == 0)) || (endptr == portStr) ||
+      (*endptr != '\0') || (port < 1) || (port > USHRT_MAX)) {
+
+      printf("Invalid port number.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   return port;
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -235,14 +268,20 @@ int main(int argc, char *argv[]) {
    int remotePortNum, localPortNum;
    struct sockaddr addr;
 
-   createSocket(remotePort,&socketfd,domain,&addr);
-
-   connectionServer(&socketfd,addr);
-
    struct list eventList;
    initializeList(&eventList);
 
-   readEvents(fd,socketfd,&eventList);
+   int success = 0;
+
+   while (!success) {
+
+      createSocket(remotePort,&socketfd,domain,&addr);
+
+      connectionServer(&socketfd,addr);
+
+      success = readEvents(fd,socketfd,&eventList);
+
+   }
 
    close(socketfd);
 

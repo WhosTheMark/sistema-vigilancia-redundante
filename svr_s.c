@@ -8,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <pthread.h>
+#define BUFF_SIZE 29
 
 void usage() {
 
@@ -87,7 +89,7 @@ void createSocket(int *listenfd, int portNum) {
    struct sockaddr_in serv_addr;
 
    /* Se crea el welcoming socket */
-   *listenfd = socket(AF_INET, SOCK_STREAM, 0);
+   *listenfd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
    // Se inicializa todo en 0 por si acaso.
    memset(&serv_addr, '0', sizeof(serv_addr));
@@ -105,6 +107,25 @@ void createSocket(int *listenfd, int portNum) {
    }
 }
 
+void *receiveMsgs(void *socketfd) {
+
+   int n = 1, *fd = (int *) socketfd;
+
+   char buffer[BUFF_SIZE];
+   memset(buffer, '0', sizeof(buffer));
+
+   while (n != 0) {
+
+      n = read(*fd, buffer, sizeof(buffer)-1);
+      buffer[n] = 0;
+      printf("%s\n",buffer);
+   }
+
+   close(*fd);
+}
+
+
+
 int main(int argc, char *argv[]) {
 
    char port[10];
@@ -117,29 +138,31 @@ int main(int argc, char *argv[]) {
 
    checkArguments(port,logPath,&portNum,&log);
 
-   int listenfd = 0, connfd = 0;
-   char buffer[1024];
-
-   memset(buffer, '0', sizeof(buffer));
+   int listenfd = 0, *connfd;
 
    createSocket(&listenfd,portNum);
 
    // Escucha por un cliente.
    listen(listenfd, 128);
 
-   //Abre el socket con el cliente
-   connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+   pthread_t *atmThread;
 
-   int n = 1;
+   while (1) {
 
-   while (n != 0) {
+      connfd = calloc(1,sizeof(int));
 
-      n = read(connfd, buffer, sizeof(buffer)-1);
-      buffer[n] = 0;
-      printf("%s\n",buffer);
+      //Abre el socket con el cliente
+      *connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+
+      atmThread = calloc(1,sizeof(pthread_t));
+
+      if (pthread_create(atmThread,NULL,receiveMsgs,(void *) connfd)) {
+
+         printf("Error creating thread.\n");
+         exit(EXIT_FAILURE);
+      }
    }
 
-   close(connfd);
    close(listenfd);
 
    if (log != NULL)
