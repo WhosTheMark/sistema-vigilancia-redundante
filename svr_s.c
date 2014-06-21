@@ -9,12 +9,36 @@
 #include <unistd.h>
 #include <limits.h>
 #include <pthread.h>
-#define BUFF_SIZE 29
+#include <signal.h>
+#include "list.h"
+#define MSGSIZE 81
+
+pthread_mutex_t mutexList;
+int execute;
+
+struct atmThreadArgs {
+
+   int socketfd;
+   struct list *msgList;
+};
+
+struct logThreadArgs {
+
+   FILE *logFile;
+   struct list *msgList;
+};
 
 void usage() {
 
    printf("Usage: ./svr_s -l <puerto_svr_s> -b <archivo_bitacora>\n");
    exit(EXIT_FAILURE);
+}
+
+void terminateHandler(int signum) {
+
+   execute = 0;
+   printf("Exiting server...\n");
+
 }
 
 void serverArguments(int argc, char *argv[], char *port, char *log) {
@@ -107,24 +131,55 @@ void createSocket(int *listenfd, int portNum) {
    }
 }
 
-void *receiveMsgs(void *socketfd) {
+void *receiveMsgs(void *atmArgs) {
 
-   int n = 1, *fd = (int *) socketfd;
+   struct atmThreadArgs *args = (struct atmThreadArgs *) atmArgs;
+   int socketfd = args->socketfd;
+   struct list *msgList = args->msgList;
 
-   char buffer[BUFF_SIZE];
-   memset(buffer, '0', sizeof(buffer));
+   int n = 1;
+
+   int msgSize = MSGSIZE * sizeof(char);
 
    while (n != 0) {
 
-      n = read(*fd, buffer, sizeof(buffer)-1);
-      buffer[n] = 0;
-      printf("%s\n",buffer);
+      char *msg = calloc(MSGSIZE,sizeof(char));
+      memset(msg, '0', msgSize);
+
+      n = read(socketfd, msg, msgSize-1);
+      msg[n] = 0;
+
+      pthread_mutex_lock(&mutexList);
+      addElement(msg,msgList);
+      pthread_mutex_unlock(&mutexList);
+
    }
 
-   close(*fd);
+   close(socketfd);
 }
 
+void *writeLog(void *logArgs) {
 
+   struct logThreadArgs *args = (struct logThreadArgs *) logArgs;
+   FILE *logFile = args->logFile;
+   struct list *msgList = args->msgList;
+
+   while (execute) {
+      while (listSize(msgList) == 0);
+
+      while (listSize(msgList) > 0) {
+
+         pthread_mutex_lock(&mutexList);
+         char *msg = getElement(msgList);
+         pthread_mutex_unlock(&mutexList);
+
+         printf("Event: %s\n",msg);
+         fprintf(logFile,"%s\n",msg);
+      }
+   }
+
+   fclose(logFile);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -145,18 +200,46 @@ int main(int argc, char *argv[]) {
    // Escucha por un cliente.
    listen(listenfd, 128);
 
-   pthread_t *atmThread;
+   struct list *msgList = calloc(1,sizeof(struct list));
+   initializeList(msgList);
 
-   while (1) {
+   pthread_t *atmThread, logThread;
+   pthread_mutex_init(&mutexList,NULL);
+
+   struct logThreadArgs *logArgs = calloc(1,sizeof(struct logThreadArgs));
+
+   logArgs->logFile = log;
+   logArgs->msgList = msgList;
+
+
+   if (pthread_create(&logThread,NULL,writeLog,(void *) logArgs)) {
+      printf("Error creating log thread.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   execute = 1;
+   struct sigaction act;
+
+   act.sa_handler = terminateHandler;
+   sigemptyset(&act.sa_mask);
+   act.sa_flags = 0;
+   sigaction(SIGINT,&act,NULL);
+
+   while (execute) {
 
       connfd = calloc(1,sizeof(int));
 
       //Abre el socket con el cliente
       *connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
 
+      struct atmThreadArgs *args = calloc(1,sizeof(struct atmThreadArgs));
+
+      args->socketfd = *connfd;
+      args->msgList = msgList;
+
       atmThread = calloc(1,sizeof(pthread_t));
 
-      if (pthread_create(atmThread,NULL,receiveMsgs,(void *) connfd)) {
+      if (pthread_create(atmThread,NULL,receiveMsgs,(void *) args)) {
 
          printf("Error creating thread.\n");
          exit(EXIT_FAILURE);
@@ -165,8 +248,6 @@ int main(int argc, char *argv[]) {
 
    close(listenfd);
 
-   if (log != NULL)
-      fclose(log);
 
    return 0;
 }

@@ -12,6 +12,8 @@
 #include <limits.h>
 #include <netdb.h>
 #define NUMTRIES 99
+#define EVENTSIZE 50
+#define MSGSIZE 80
 
 pthread_mutex_t mutexList;
 
@@ -135,6 +137,25 @@ void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *
    *addr = *(servInfo->ai_addr);
 }
 
+
+void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struct list *eventList) {
+
+   close(*socketfd);
+
+   struct sockaddr addr;
+
+   createSocket(remotePort,socketfd,domain,&addr);
+   connectionServer(socketfd,addr);
+
+   printf("event: %s\n",event);
+   pthread_mutex_lock(&mutexList);
+   addElement(event,eventList);
+   pthread_mutex_unlock(&mutexList);
+
+}
+
+
+
 int sendEvents(void *sendArgs) {
 
    struct sendThreadArgs *args = (struct sendThreadArgs *) sendArgs;
@@ -158,8 +179,6 @@ int sendEvents(void *sendArgs) {
 
       while (listSize(eventList) > 0) {
 
-         // SEMAFORO
-
          pthread_mutex_lock(&mutexList);
          event = getElement(eventList);
          pthread_mutex_unlock(&mutexList);
@@ -168,20 +187,14 @@ int sendEvents(void *sendArgs) {
          int numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
          int numTries = 0;
 
+         //ERRORS
+
          if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
 
-            close(socketfd);
+            //TODO FIRST LOST MSG IS LOST FOREVER :(
+            reconnect(&socketfd,remotePort,domain,event,eventList);
 
-            createSocket(remotePort,&socketfd,domain,&addr);
-            connectionServer(&socketfd,addr);
-
-            printf("event: %s\n",event);
-            pthread_mutex_lock(&mutexList);
-            addElement(event,eventList);
-            pthread_mutex_unlock(&mutexList);
-         }
-
-         if (numBytes == -1) {
+         } else if (numBytes == -1) {
 
             while (numBytes < 0 && numTries < 10) {
 
@@ -196,15 +209,7 @@ int sendEvents(void *sendArgs) {
 
             if (numTries == 10) {
 
-               close(socketfd);
-
-               createSocket(remotePort,&socketfd,domain,&addr);
-               connectionServer(&socketfd,addr);
-
-
-               pthread_mutex_lock(&mutexList);
-               addElement(event,eventList);
-               pthread_mutex_unlock(&mutexList);
+               reconnect(&socketfd,remotePort,domain,event,eventList);
 
             }
          }
@@ -214,33 +219,40 @@ int sendEvents(void *sendArgs) {
    return 1;
 }
 
+
+
+
 void *readEvents(void *eList) {
 
    struct list *eventList = (struct list *) eList;
-   int lenEvent = 28;
+   int lenEvent = EVENTSIZE;
+   char *eventMsg = calloc(EVENTSIZE,sizeof(char));
 
    while (1) {
 
-      char *eventMsg = calloc(40,sizeof(char));
-      memset(eventMsg,' ',40*sizeof(char));
-      //fscanf(stdin, "%s\n", eventMsg);
-
       fgets(eventMsg,lenEvent,stdin);
-
-      int lengthEvent = strlen(eventMsg);
-      eventMsg[lengthEvent] = ' ';
-      eventMsg[lengthEvent-1] = ' ';
-      eventMsg[28] = '\0';
-      printf("event: %s, size: %d\n", eventMsg, lengthEvent);
 
       time_t rawtime = time(NULL);
       struct tm *timeEvent = localtime(&rawtime);
 
-      //sprintf(eventMsg, "%2d,%s", eventCode, asctime(timeEvent));
-      pthread_mutex_lock(&mutexList);
-      addElement(eventMsg,eventList);
-      pthread_mutex_unlock(&mutexList);
+      char *msg = calloc(MSGSIZE,sizeof(char));
 
+      memset(msg,' ',MSGSIZE*sizeof(char));
+
+      char *strTime = asctime(timeEvent);
+
+      strTime[strlen(strTime)-1] = '\0';
+      sprintf(msg, "%s, %s",strTime,eventMsg);
+
+      int lengthEvent = strlen(msg);
+      msg[lengthEvent] = ' ';
+      msg[lengthEvent-1] = ' ';
+      msg[MSGSIZE] = '\0';
+      printf("event: %s, size: %d\n", msg, lengthEvent);
+
+      pthread_mutex_lock(&mutexList);
+      addElement(msg,eventList);
+      pthread_mutex_unlock(&mutexList);
 
    }
 }
