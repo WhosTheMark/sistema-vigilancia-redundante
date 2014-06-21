@@ -1,7 +1,7 @@
 all: client server
 
 client: svr_c.o list.o
-	gcc svr_c.o -o svr_c
+	gcc -pthread svr_c.o -o svr_c
 
 svr_c.o: svr_c.c
 	gcc -c svr_c.c

@@ -11,6 +11,17 @@
 #include "list.h"
 #include <limits.h>
 #include <netdb.h>
+#define NUMTRIES 99
+
+pthread_mutex_t mutexList;
+
+struct sendThreadArgs {
+
+   //NOTE Local port?
+   char *remotePort;
+   char *domain;
+   struct list *eventList;
+};
 
 void usage() {
 
@@ -78,7 +89,7 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
 
    int numTries;
 
-   for (numTries = 99; numTries > -1; --numTries) {
+   for (numTries = NUMTRIES; numTries > -1; --numTries) {
 
       /* Intenta establecer una conexion al servidor */
       if((connect(*socketfd,&addr, sizeof(addr)) < 0) && numTries > 0){
@@ -124,41 +135,78 @@ void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *
    *addr = *(servInfo->ai_addr);
 }
 
-int sendEvents(int *socketfd, struct list *eventList) {
+int sendEvents(void *sendArgs) {
 
-   char *event;
+   struct sendThreadArgs *args = (struct sendThreadArgs *) sendArgs;
 
-   while (listSize(eventList) > 0) {
+   char *remotePort = (char *) args->remotePort;
+   char *domain = (char *) args->domain;
+   struct list *eventList = (struct list *) args->eventList;
 
-      event = getElement(eventList);
-      errno = 0;
-      int numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
-      int numTries = 0;
+   int socketfd;
+   struct sockaddr addr;
 
-      if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
-
-         printf("event: %s\n",event);
-         addElement(event,eventList);
-         return 0;
-      }
-
-      if (numBytes == -1) {
+   createSocket(remotePort,&socketfd,domain,&addr);
+   connectionServer(&socketfd,addr);
 
 
-         while (numBytes < 0 && numTries < 10) {
+   while (1) {
 
-            printf("Error sending message. Trying again...\n");
+      while (listSize(eventList) == 0);
 
-            errno = 0;
-            numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
+      char *event;
 
-            ++numTries;
-            sleep(1);
+      while (listSize(eventList) > 0) {
+
+         // SEMAFORO
+
+         pthread_mutex_lock(&mutexList);
+         event = getElement(eventList);
+         pthread_mutex_unlock(&mutexList);
+
+         errno = 0;
+         int numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
+         int numTries = 0;
+
+         if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
+
+            close(socketfd);
+
+            createSocket(remotePort,&socketfd,domain,&addr);
+            connectionServer(&socketfd,addr);
+
+            printf("event: %s\n",event);
+            pthread_mutex_lock(&mutexList);
+            addElement(event,eventList);
+            pthread_mutex_unlock(&mutexList);
          }
 
-         if (numTries == 10) {
-            addElement(event,eventList);
+         if (numBytes == -1) {
 
+            while (numBytes < 0 && numTries < 10) {
+
+               printf("Error sending message. Trying again...\n");
+
+               errno = 0;
+               numBytes = send(socketfd,event,strlen(event),MSG_NOSIGNAL);
+
+               ++numTries;
+               sleep(1);
+            }
+
+            if (numTries == 10) {
+
+               close(socketfd);
+
+               createSocket(remotePort,&socketfd,domain,&addr);
+               connectionServer(&socketfd,addr);
+
+
+               pthread_mutex_lock(&mutexList);
+               addElement(event,eventList);
+               pthread_mutex_unlock(&mutexList);
+
+            }
          }
       }
    }
@@ -166,64 +214,35 @@ int sendEvents(int *socketfd, struct list *eventList) {
    return 1;
 }
 
-int readEvents(FILE *fd, int socketfd, struct list *eventList) {
+void *readEvents(void *eList) {
 
-   int numMsgs;
+   struct list *eventList = (struct list *) eList;
+   int lenEvent = 28;
 
-   int endFile = fscanf(fd, "%d", &numMsgs) == EOF;
-   int successSending = 0;
+   while (1) {
 
-   while (!endFile && numMsgs != 0) {
+      char *eventMsg = calloc(40,sizeof(char));
+      memset(eventMsg,' ',40*sizeof(char));
+      //fscanf(stdin, "%s\n", eventMsg);
 
-      int eventCode;
-      char *eventMsg;
+      fgets(eventMsg,lenEvent,stdin);
 
-      printf("Sending messages\n");
+      int lengthEvent = strlen(eventMsg);
+      eventMsg[lengthEvent] = ' ';
+      eventMsg[lengthEvent-1] = ' ';
+      eventMsg[28] = '\0';
+      printf("event: %s, size: %d\n", eventMsg, lengthEvent);
 
-      while (!endFile && numMsgs != 0) {
+      time_t rawtime = time(NULL);
+      struct tm *timeEvent = localtime(&rawtime);
 
-         endFile = fscanf(fd, "%d", &eventCode) == EOF;
+      //sprintf(eventMsg, "%2d,%s", eventCode, asctime(timeEvent));
+      pthread_mutex_lock(&mutexList);
+      addElement(eventMsg,eventList);
+      pthread_mutex_unlock(&mutexList);
 
-         time_t rawtime = time(NULL);
-         struct tm *timeEvent = localtime(&rawtime);
 
-         eventMsg = calloc(40,sizeof(char));
-         sprintf(eventMsg, "%2d,%s", eventCode, asctime(timeEvent));
-         addElement(eventMsg,eventList);
-
-         --numMsgs;
-      }
-
-      successSending = sendEvents(&socketfd,eventList);
-
-      if (!successSending) {
-         close(socketfd);
-         return 0;
-      }
-
-      endFile = fscanf(fd, "%d", &numMsgs) == EOF;
-      sleep(10);
    }
-
-   int numTries;
-
-   for (numTries = 0; numTries < 20 && !successSending; ++numTries) {
-      successSending = sendEvents(&socketfd,eventList);
-   }
-
-   if (!successSending) {
-      close(socketfd);
-      return 0;
-   }
-
-   fclose(fd);
-
-   if (endFile) {
-      printf("Format of file is incorrect.\n");
-      exit(EXIT_FAILURE);
-   }
-
-   return 1;
 }
 
 
@@ -247,43 +266,44 @@ int portStrToNum(char *portStr) {
 
 int main(int argc, char *argv[]) {
 
-   char *path = calloc(100,sizeof(char));
-   path = "tests/msg1.txt";
-   FILE *fd = fopen(path,"r");
-
-   if (fd == NULL) {
-      printf("File %s cannot be opened.", path);
-      perror("");
-      exit(EXIT_FAILURE);
-   }
-
    char *domain = calloc(100,sizeof(char));
    char *remotePort = calloc(10,sizeof(char));
    char *localPort = calloc(10,sizeof(char));
 
    clientArguments(argc,argv,domain,remotePort,localPort);
 
-   int socketfd = 0;
-
-   int remotePortNum, localPortNum;
-   struct sockaddr addr;
-
    struct list eventList;
    initializeList(&eventList);
 
    int success = 0;
+   void *status;
 
-   while (!success) {
+   pthread_mutex_init(&mutexList,NULL);
 
-      createSocket(remotePort,&socketfd,domain,&addr);
+   pthread_t *readThread = calloc(1,sizeof(pthread_t));
+   pthread_t *sendThread = calloc(1,sizeof(pthread_t));
 
-      connectionServer(&socketfd,addr);
+   if (pthread_create(readThread,NULL,readEvents,(void *) &eventList)) {
 
-      success = readEvents(fd,socketfd,&eventList);
-
+      printf("Error creating read thread.\n");
+      exit(EXIT_FAILURE);
    }
 
-   close(socketfd);
+   struct sendThreadArgs sendArgs;
+
+   sendArgs.remotePort = remotePort;
+   sendArgs.domain = domain;
+   sendArgs.eventList = &eventList;
+
+   if (pthread_create(sendThread,NULL,sendEvents,(void *) &sendArgs)) {
+
+      printf("Error creating send thread.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   while (1);
+
+
 
    return 0;
 }
