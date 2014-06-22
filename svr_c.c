@@ -143,11 +143,13 @@ void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struc
    close(*socketfd);
 
    struct sockaddr addr;
+   printf("Server was down. Reconnecting...\n");
 
    createSocket(remotePort,socketfd,domain,&addr);
    connectionServer(socketfd,addr);
 
-   printf("event: %s\n",event);
+   printf("Connection established.\n");
+
    pthread_mutex_lock(&mutexList);
    addElement(event,eventList);
    pthread_mutex_unlock(&mutexList);

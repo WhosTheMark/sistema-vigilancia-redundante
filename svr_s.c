@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <signal.h>
+#include "codes.c"
 #include "list.h"
 #define MSGSIZE 81
 
@@ -165,7 +166,7 @@ void *writeLog(void *logArgs) {
    struct list *msgList = args->msgList;
 
    while (execute) {
-      while (listSize(msgList) == 0);
+      while (listSize(msgList) == 0 && execute);
 
       while (listSize(msgList) > 0) {
 
@@ -173,12 +174,14 @@ void *writeLog(void *logArgs) {
          char *msg = getElement(msgList);
          pthread_mutex_unlock(&mutexList);
 
-         printf("Event: %s\n",msg);
-         fprintf(logFile,"%s\n",msg);
+         int code = getCode(msg);
+         printf("Code: %d, Event: %s\n",code,msg);
+         fprintf(logFile,"%d,%s\n",code,msg);
       }
    }
 
    fclose(logFile);
+   pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[]) {
@@ -211,15 +214,19 @@ int main(int argc, char *argv[]) {
    logArgs->logFile = log;
    logArgs->msgList = msgList;
 
+   void *status;
+   pthread_attr_t attr;
+   pthread_attr_init(&attr);
+   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
 
-   if (pthread_create(&logThread,NULL,writeLog,(void *) logArgs)) {
+
+   if (pthread_create(&logThread,&attr,writeLog,(void *) logArgs)) {
       printf("Error creating log thread.\n");
       exit(EXIT_FAILURE);
    }
 
    execute = 1;
    struct sigaction act;
-
    act.sa_handler = terminateHandler;
    sigemptyset(&act.sa_mask);
    act.sa_flags = 0;
@@ -231,6 +238,12 @@ int main(int argc, char *argv[]) {
 
       //Abre el socket con el cliente
       *connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+
+      if (*connfd == -1 && errno != EINTR) {
+         printf("%d. Could not accept.\n",errno);
+         perror("");
+         continue;
+      }
 
       struct atmThreadArgs *args = calloc(1,sizeof(struct atmThreadArgs));
 
@@ -245,6 +258,12 @@ int main(int argc, char *argv[]) {
          exit(EXIT_FAILURE);
       }
    }
+
+   pthread_attr_destroy(&attr);
+
+   if (pthread_join(logThread,&status))
+      printf("Error joining thread.\n");
+
 
    close(listenfd);
 
