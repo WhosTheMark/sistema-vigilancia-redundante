@@ -42,7 +42,6 @@ int getCode(char *originalMsg) {
                                     "communication offline",
                                     "device status change",
                                     "low cash alert",
-                                    "application started",
                                     "service mode entered",
                                     "safe door opened",
                                     "top cassette removed",
@@ -56,7 +55,7 @@ int getCode(char *originalMsg) {
                                     "safe door closed"
                                  };
 
-   int i, NUMCODES = 20;
+   int i, NUMCODES = 19;
 
    char *event = originalMsg + DATESIZE;
    char msg[MSGSIZE_CODE];

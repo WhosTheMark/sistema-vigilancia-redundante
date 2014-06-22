@@ -160,18 +160,32 @@ void *receiveMsgs(void *atmArgs) {
       msg[n] = 0;
 
       int code = getCode(msg);
-      printf("IP: %s, Code: %d, Event: %s\n",ipAddr,code,msg);
 
-      char *eventMsg = calloc(200,sizeof(char));
-      sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
+      if (code != -1) {
+         printf("IP: %s, Code: %d, Event: %s\n",ipAddr,code,msg);
 
-      pthread_mutex_lock(&mutexList);
-      addElement(eventMsg,msgList);
-      pthread_mutex_unlock(&mutexList);
+         char *eventMsg = calloc(200,sizeof(char));
+         sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
 
+         pthread_mutex_lock(&mutexList);
+         addElement(eventMsg,msgList);
+         pthread_mutex_unlock(&mutexList);
+      }
    }
 
    close(socketfd);
+}
+
+void writeEvent(struct list *msgList, FILE *logFile) {
+
+   while (listSize(msgList) > 0) {
+
+      pthread_mutex_lock(&mutexList);
+      char *msg = getElement(msgList);
+      pthread_mutex_unlock(&mutexList);
+
+      fprintf(logFile,"%s\n",msg);
+   }
 }
 
 void *writeLog(void *logArgs) {
@@ -181,17 +195,14 @@ void *writeLog(void *logArgs) {
    struct list *msgList = args->msgList;
 
    while (execute) {
-      while (listSize(msgList) == 0 && execute);
+      while (listSize(msgList) == 0 && execute)
+         sleep(2);
 
-      while (listSize(msgList) > 0) {
-
-         pthread_mutex_lock(&mutexList);
-         char *msg = getElement(msgList);
-         pthread_mutex_unlock(&mutexList);
-
-         fprintf(logFile,"%s\n",msg);
-      }
+      writeEvent(msgList,logFile);
    }
+
+   if (listSize(msgList) > 0)
+      writeEvent(msgList,logFile);
 
    fclose(logFile);
    pthread_exit(NULL);

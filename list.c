@@ -2,72 +2,71 @@
 #define LIST_
 
 #include <stdlib.h>
+#include <stdio.h>
 #define SIZE 1000
 
 struct list {
 
-   char *elements[SIZE];
-   int lower;
-   int upper;
-   int isFull;
+   struct box *head;
+   struct box *last;
+   struct box *backup;
+   int size;
+};
+
+struct box {
+
+   char *element;
+   struct box *next;
 };
 
 void initializeList(struct list *l) {
 
-   l->lower = 0;
-   l->upper = 0;
-   l->isFull = 0;
-
+   l->head = NULL;
+   l->last = NULL;
+   l->backup = NULL;
+   l->size = 0;
 }
 
 void addElement(char *element, struct list *l) {
 
-   if (!l->isFull) {
+   struct box *elemBox = calloc(1,sizeof(struct box));
 
-      l->elements[l->upper] = element;
-      l->upper = (l->upper+1) % SIZE;
+   elemBox->element = element;
+   elemBox->next = NULL;
+
+   ++(l->size);
+
+   if (l->head == NULL) {
+
+      l->head = elemBox;
+      l->last = elemBox;
+
+   } else {
+
+      l->last->next = elemBox;
+      l->last = elemBox;
    }
-
-   if (l->lower == l->upper)
-      l->isFull = 1;
 }
 
 char *getElement(struct list *l) {
 
-   if (l->lower == l->upper && !l->isFull) {
-
+   if (l->head == NULL)
       return NULL;
 
-   } else {
+   struct box *elemBox = l->head;
+   l->head = l->head->next;
+   --(l->size);
 
-      char *elem = l->elements[l->lower];
+   char *elem = elemBox->element;
 
-      l->lower = (l->lower+1) % SIZE;
+   free(elemBox);
 
-      if (l->isFull)
-         l->isFull = 0;
-
-      return elem;
-   }
+   return elem;
 }
 
 int listSize(struct list *l) {
 
-   int size;
-
-   if (l->lower < l->upper)
-      size = l->upper - l->lower;
-
-   else if (l->lower == l->upper && !l->isFull)
-      size = 0;
-   else if (l->lower == l->upper && l->isFull)
-      size = SIZE;
-   else
-      size = SIZE - (l->lower - l->upper);
-
-   return size;
-
-
+   return l->size;
 }
 /*
 int main () {
@@ -76,9 +75,23 @@ int main () {
    initializeList(&l);
 
    addElement("hola",&l);
-   char *elem = deleteElement(&l);
 
-   printf("elem: %s\n", elem);
+   char *elem = getElement(&l);
+
+   addElement("hola2",&l);
+
+   elem = getElement(&l);
+
+   addElement("hola3",&l);
+   addElement("hola4",&l);
+   addElement("hola5",&l);
+
+   while (listSize(&l) > 0) {
+
+      elem = getElement(&l);
+      if (elem != NULL)
+         printf("elem: %s\n", elem);
+   }
    return 0;
 }*/
 
