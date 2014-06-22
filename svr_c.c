@@ -110,6 +110,8 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
       printf("Connection to server failed.\n");
       exit(EXIT_FAILURE);
    }
+
+   printf("Connection established.\n");
 }
 
 void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *addr) {
@@ -147,8 +149,6 @@ void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struc
 
    createSocket(remotePort,socketfd,domain,&addr);
    connectionServer(socketfd,addr);
-
-   printf("Connection established.\n");
 
    pthread_mutex_lock(&mutexList);
    addElement(event,eventList);

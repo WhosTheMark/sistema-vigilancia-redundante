@@ -138,6 +138,15 @@ void *receiveMsgs(void *atmArgs) {
    int socketfd = args->socketfd;
    struct list *msgList = args->msgList;
 
+   struct sockaddr_in addr;
+   int addrLen;
+
+   addr.sin_family = AF_INET;
+   addrLen = sizeof(addr);
+   getpeername(socketfd,(struct sockaddr *)&addr,&addrLen);
+
+   char *ipAddr = inet_ntoa(addr.sin_addr);
+
    int n = 1;
 
    int msgSize = MSGSIZE * sizeof(char);
@@ -150,8 +159,14 @@ void *receiveMsgs(void *atmArgs) {
       n = read(socketfd, msg, msgSize-1);
       msg[n] = 0;
 
+      int code = getCode(msg);
+      printf("IP: %s, Code: %d, Event: %s\n",ipAddr,code,msg);
+
+      char *eventMsg = calloc(200,sizeof(char));
+      sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
+
       pthread_mutex_lock(&mutexList);
-      addElement(msg,msgList);
+      addElement(eventMsg,msgList);
       pthread_mutex_unlock(&mutexList);
 
    }
@@ -174,9 +189,7 @@ void *writeLog(void *logArgs) {
          char *msg = getElement(msgList);
          pthread_mutex_unlock(&mutexList);
 
-         int code = getCode(msg);
-         printf("Code: %d, Event: %s\n",code,msg);
-         fprintf(logFile,"%d,%s\n",code,msg);
+         fprintf(logFile,"%s\n",msg);
       }
    }
 
@@ -237,7 +250,7 @@ int main(int argc, char *argv[]) {
       connfd = calloc(1,sizeof(int));
 
       //Abre el socket con el cliente
-      *connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
+      *connfd = accept(listenfd, (struct sockaddr*)NULL,NULL);
 
       if (*connfd == -1 && errno != EINTR) {
          printf("%d. Could not accept.\n",errno);
