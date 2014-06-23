@@ -12,7 +12,7 @@
 #include <signal.h>
 #include "codes.c"
 #include "list.h"
-#define MSGSIZE 81
+#define MSGSIZE 80
 
 pthread_mutex_t mutexList;
 int execute;
@@ -151,10 +151,10 @@ void *receiveMsgs(void *atmArgs) {
 
    int msgSize = MSGSIZE * sizeof(char);
 
-   while (n != 0) {
+   while (n != 0 && execute) {
 
       char *msg = calloc(MSGSIZE,sizeof(char));
-      memset(msg, '0', msgSize);
+      memset(msg, 0, msgSize);
 
       n = read(socketfd, msg, msgSize-1);
       msg[n] = 0;
@@ -162,8 +162,8 @@ void *receiveMsgs(void *atmArgs) {
       int code = getCode(msg);
 
       if (code != -1) {
-         printf("IP: %s, Code: %d, Event: %s\n",ipAddr,code,msg);
 
+         printf("IP: %s, Code: %d, Event: %s\n",ipAddr,code,msg);
          char *eventMsg = calloc(200,sizeof(char));
          sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
 

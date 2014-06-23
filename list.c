@@ -9,7 +9,8 @@ struct list {
 
    struct box *head;
    struct box *last;
-   struct box *backup;
+   struct box *secondLastBackup;
+   struct box *lastBackup;
    int size;
 };
 
@@ -23,7 +24,8 @@ void initializeList(struct list *l) {
 
    l->head = NULL;
    l->last = NULL;
-   l->backup = NULL;
+   l->secondLastBackup = NULL;
+   l->lastBackup = NULL;
    l->size = 0;
 }
 
@@ -57,9 +59,17 @@ char *getElement(struct list *l) {
    l->head = l->head->next;
    --(l->size);
 
+   if (l->size == 0)
+      l->last = NULL;
+
    char *elem = elemBox->element;
 
-   free(elemBox);
+   if (l->secondLastBackup != NULL && l->secondLastBackup != elemBox)
+      free(l->secondLastBackup);
+
+
+   l->secondLastBackup = l->lastBackup;
+   l->lastBackup = elemBox;
 
    return elem;
 }
@@ -68,6 +78,22 @@ int listSize(struct list *l) {
 
    return l->size;
 }
+
+void restoreBackup(struct list *l) {
+
+   if (l->secondLastBackup != NULL) {
+
+      l->secondLastBackup->next = l->head;
+      l->head = l->secondLastBackup;
+      ++(l->size);
+
+      if (l->size == 1)
+         l->last = l->head;
+   }
+}
+
+
+
 /*
 int main () {
 
@@ -78,9 +104,13 @@ int main () {
 
    char *elem = getElement(&l);
 
+   restoreBackup(&l);
+
    addElement("hola2",&l);
 
    elem = getElement(&l);
+
+   restoreBackup(&l);
 
    addElement("hola3",&l);
    addElement("hola4",&l);

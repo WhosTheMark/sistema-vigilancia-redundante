@@ -153,6 +153,7 @@ void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struc
    connectionServer(socketfd,addr);
 
    pthread_mutex_lock(&mutexList);
+   restoreBackup(eventList);
    addElement(event,eventList);
    pthread_mutex_unlock(&mutexList);
 
@@ -259,7 +260,7 @@ void *readEvents(void *eList) {
       msg[lengthEvent] = ' ';
       if (msg[lengthEvent-1] == '\n')
          msg[lengthEvent-1] = ' ';
-      msg[MSGSIZE] = '\0';
+      msg[MSGSIZE-1] = '\0';
       printf("Message: %s\n", msg);
 
       pthread_mutex_lock(&mutexList);
