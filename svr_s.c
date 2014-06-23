@@ -116,6 +116,11 @@ void createSocket(int *listenfd, int portNum) {
    /* Se crea el welcoming socket */
    *listenfd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
+   if (*listenfd == -1) {
+      printf("Error: creating listen socket.\n");
+      exit(EXIT_FAILURE);
+   }
+
    // Se inicializa todo en 0 por si acaso.
    memset(&serv_addr, '0', sizeof(serv_addr));
 
@@ -143,6 +148,7 @@ void *receiveMsgs(void *atmArgs) {
 
    addr.sin_family = AF_INET;
    addrLen = sizeof(addr);
+   addr.sin_addr.s_addr = 0L;
    getpeername(socketfd,(struct sockaddr *)&addr,&addrLen);
 
    char *ipAddr = inet_ntoa(addr.sin_addr);
@@ -150,10 +156,10 @@ void *receiveMsgs(void *atmArgs) {
    int n = 1;
 
    int msgSize = MSGSIZE * sizeof(char);
+   char msg[MSGSIZE];
 
    while (n != 0 && execute) {
 
-      char *msg = calloc(MSGSIZE,sizeof(char));
       memset(msg, 0, msgSize);
 
       n = read(socketfd, msg, msgSize-1);
@@ -171,7 +177,10 @@ void *receiveMsgs(void *atmArgs) {
          addElement(eventMsg,msgList);
          pthread_mutex_unlock(&mutexList);
       }
+
    }
+
+   free(args);
 
    close(socketfd);
 }
@@ -204,6 +213,7 @@ void *writeLog(void *logArgs) {
    if (listSize(msgList) > 0)
       writeEvent(msgList,logFile);
 
+   free(args);
    fclose(logFile);
    pthread_exit(NULL);
 }
@@ -241,20 +251,22 @@ void handleRequests(struct list *msgList, int listenfd) {
 
    while (execute) {
 
-      int *connfd = calloc(1,sizeof(int));
+      int connfd = -1;
 
       //Abre el socket con el cliente
-      *connfd = accept(listenfd, (struct sockaddr*)NULL,NULL);
+      connfd = accept(listenfd, (struct sockaddr*)NULL,NULL);
 
-      if (*connfd == -1 && errno != EINTR) {
-         printf("%d. Could not accept.\n",errno);
-         perror("");
+      if (!execute)
+         break;
+
+      if (connfd == -1 && errno != EINTR) {
+         printf("Could not accept client.\n");
          continue;
       }
 
       struct atmThreadArgs *args = calloc(1,sizeof(struct atmThreadArgs));
 
-      args->socketfd = *connfd;
+      args->socketfd = connfd;
       args->msgList = msgList;
 
       pthread_t *atmThread = calloc(1,sizeof(pthread_t));
@@ -272,7 +284,7 @@ void handleRequests(struct list *msgList, int listenfd) {
 int main(int argc, char *argv[]) {
 
    char port[10];
-   char *logPath = calloc(200,sizeof(char));
+   char logPath[200];
 
    serverArguments(argc,argv,port,logPath);
 
@@ -304,6 +316,8 @@ int main(int argc, char *argv[]) {
       printf("Error joining thread.\n");
 
    close(listenfd);
+   destroyList(msgList);
+   free(msgList);
 
    return 0;
 }

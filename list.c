@@ -64,9 +64,10 @@ char *getElement(struct list *l) {
 
    char *elem = elemBox->element;
 
-   if (l->secondLastBackup != NULL && l->secondLastBackup != elemBox)
+   if (l->secondLastBackup != NULL && l->secondLastBackup != elemBox) {
+      free(l->secondLastBackup->element);
       free(l->secondLastBackup);
-
+   }
 
    l->secondLastBackup = l->lastBackup;
    l->lastBackup = elemBox;
@@ -90,6 +91,28 @@ void restoreBackup(struct list *l) {
       if (l->size == 1)
          l->last = l->head;
    }
+}
+
+void destroyList(struct list *l){
+
+
+   while (l->head != NULL) {
+      struct box *boxHelper = l->head;
+      l->head = boxHelper->next;
+      free(boxHelper->element);
+      free(boxHelper);
+   }
+
+   if (l->secondLastBackup != NULL) {
+      free(l->secondLastBackup->element);
+      free(l->secondLastBackup);
+   }
+
+   if (l->lastBackup != NULL) {
+      free(l->lastBackup->element);
+      free(l->lastBackup);
+   }
+
 }
 
 

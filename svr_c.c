@@ -21,10 +21,10 @@ int execute;
 
 struct sendThreadArgs {
 
-   //NOTE Local port?
    char *remotePort;
    char *domain;
    struct list *eventList;
+   int localPort;
 };
 
 void usage() {
@@ -106,7 +106,7 @@ char *createMsg(char *eventMsg) {
    if (msg[lengthEvent-1] == '\n')
       msg[lengthEvent-1] = ' ';
    msg[MSGSIZE-1] = '\0';
-   printf("Message: %s\n", msg);
+   printf("Message to send: %s\n", msg);
 
    return msg;
 
@@ -149,7 +149,8 @@ void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventLis
    printf("Connection established.\n");
 }
 
-void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *addr) {
+void createSocket(char *remotePort, int localPort, int *sockfd, char *domain, struct sockaddr *addr) {
+
 
    struct addrinfo hints, *servInfo, *p;
 
@@ -170,17 +171,36 @@ void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *
    }
 
    *addr = *(servInfo->ai_addr);
+
+   if (localPort != -1) {
+
+      struct sockaddr_in localAddr;
+
+      localAddr.sin_family = AF_INET;
+      localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+      localAddr.sin_port = htons(localPort);
+
+      bind(*sockfd, (struct sockaddr *)&localAddr, sizeof(localAddr));
+
+      if (errno == EADDRINUSE) {
+         printf("Error: port #%d is already in use.\n",localPort);
+         exit(EXIT_FAILURE);
+      }
+   }
+
+   free(servInfo);
+
 }
 
 
-void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struct list *eventList) {
+void reconnect(int *socketfd, char *remotePort, int localPort, char *domain, char *event, struct list *eventList) {
 
    close(*socketfd);
 
    struct sockaddr addr;
    printf("Server was down. Reconnecting...\n");
 
-   createSocket(remotePort,socketfd,domain,&addr);
+   createSocket(remotePort,localPort,socketfd,domain,&addr);
    connectionServer(socketfd,addr,eventList);
 
    pthread_mutex_lock(&mutexList);
@@ -190,7 +210,7 @@ void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struc
 
 }
 
-void sendEventsHelper(char *remotePort, char *domain, int *socketfd, struct list *eventList) {
+void sendEventsHelper(char *remotePort, int localPort, char *domain, int *socketfd, struct list *eventList) {
 
    char *event;
 
@@ -207,7 +227,7 @@ void sendEventsHelper(char *remotePort, char *domain, int *socketfd, struct list
 
       if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
 
-         reconnect(socketfd,remotePort,domain,event,eventList);
+         reconnect(socketfd,remotePort,localPort,domain,event,eventList);
 
       } else if (numBytes == -1) {
 
@@ -224,7 +244,7 @@ void sendEventsHelper(char *remotePort, char *domain, int *socketfd, struct list
 
          if (numTries == 10) {
 
-            reconnect(socketfd,remotePort,domain,event,eventList);
+            reconnect(socketfd,remotePort,localPort,domain,event,eventList);
 
          }
       }
@@ -236,14 +256,15 @@ void *sendEvents(void *sendArgs) {
 
    struct sendThreadArgs *args = (struct sendThreadArgs *) sendArgs;
 
-   char *remotePort = (char *) args->remotePort;
-   char *domain = (char *) args->domain;
-   struct list *eventList = (struct list *) args->eventList;
+   char *remotePort = args->remotePort;
+   char *domain = args->domain;
+   struct list *eventList = args->eventList;
+   int localPort = args->localPort;
 
    int socketfd;
    struct sockaddr addr;
 
-   createSocket(remotePort,&socketfd,domain,&addr);
+   createSocket(remotePort,localPort,&socketfd,domain,&addr);
    connectionServer(&socketfd,addr,eventList);
 
    while (execute) {
@@ -251,11 +272,11 @@ void *sendEvents(void *sendArgs) {
       while (listSize(eventList) == 0 && execute)
          sleep(2);
 
-      sendEventsHelper(remotePort,domain,&socketfd,eventList);
+      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList);
    }
 
    if (listSize(eventList) > 0)
-      sendEventsHelper(remotePort,domain,&socketfd,eventList);
+      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList);
 
    pthread_exit(NULL);
 }
@@ -282,6 +303,8 @@ void *readEvents(void *eList) {
       pthread_mutex_unlock(&mutexList);
 
    }
+
+   free(eventMsg);
 }
 
 
@@ -290,6 +313,10 @@ int portStrToNum(char *portStr) {
 
    errno = 0;
    char *endptr;
+
+   if (strcmp(portStr,"") == 0)
+      return -1;
+
    int port = strtol(portStr,&endptr,10);
 
    if ((errno == ERANGE || (errno != 0 && port == 0)) || (endptr == portStr) ||
@@ -302,7 +329,7 @@ int portStrToNum(char *portStr) {
    return port;
 }
 
-void intializeClient(pthread_t *sendThread,struct sendThreadArgs sendArgs, struct list *eventList) {
+void intializeClient(pthread_t *readThread, pthread_t *sendThread,struct sendThreadArgs sendArgs, struct list *eventList) {
 
    execute = 1;
 
@@ -311,9 +338,6 @@ void intializeClient(pthread_t *sendThread,struct sendThreadArgs sendArgs, struc
    pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
 
    pthread_mutex_init(&mutexList,NULL);
-
-   pthread_t *readThread = calloc(1,sizeof(pthread_t));
-
 
    if (pthread_create(readThread,NULL,readEvents,(void *) eventList)) {
 
@@ -338,6 +362,8 @@ int main(int argc, char *argv[]) {
 
    clientArguments(argc,argv,domain,remotePort,localPort);
 
+   int localPortNum = portStrToNum(localPort);
+
    struct list eventList;
    initializeList(&eventList);
 
@@ -351,16 +377,25 @@ int main(int argc, char *argv[]) {
    sendArgs.remotePort = remotePort;
    sendArgs.domain = domain;
    sendArgs.eventList = &eventList;
+   sendArgs.localPort = localPortNum;
 
+   pthread_t *readThread = calloc(1,sizeof(pthread_t));
    pthread_t *sendThread = calloc(1,sizeof(pthread_t));
 
-   intializeClient(sendThread,sendArgs,&eventList);
+   intializeClient(readThread,sendThread,sendArgs,&eventList);
 
    while (execute)
       sleep(2);
 
    if (pthread_join(*sendThread,&status))
       printf("Error joining thread.\n");
+
+   free(readThread);
+   free(sendThread);
+   free(domain);
+   free(remotePort);
+   free(localPort);
+   destroyList(&eventList);
 
    return 0;
 }
