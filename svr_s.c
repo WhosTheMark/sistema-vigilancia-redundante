@@ -38,7 +38,7 @@ void usage() {
 void terminateHandler(int signum) {
 
    execute = 0;
-   printf("Exiting server...\n");
+   printf("\nExiting server...\n");
 
 }
 
@@ -208,46 +208,8 @@ void *writeLog(void *logArgs) {
    pthread_exit(NULL);
 }
 
-int main(int argc, char *argv[]) {
 
-   char port[10];
-   char *logPath = calloc(200,sizeof(char));
-
-   serverArguments(argc,argv,port,logPath);
-
-   FILE *log = NULL;
-   int portNum;
-
-   checkArguments(port,logPath,&portNum,&log);
-
-   int listenfd = 0, *connfd;
-
-   createSocket(&listenfd,portNum);
-
-   // Escucha por un cliente.
-   listen(listenfd, 128);
-
-   struct list *msgList = calloc(1,sizeof(struct list));
-   initializeList(msgList);
-
-   pthread_t *atmThread, logThread;
-   pthread_mutex_init(&mutexList,NULL);
-
-   struct logThreadArgs *logArgs = calloc(1,sizeof(struct logThreadArgs));
-
-   logArgs->logFile = log;
-   logArgs->msgList = msgList;
-
-   void *status;
-   pthread_attr_t attr;
-   pthread_attr_init(&attr);
-   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
-
-
-   if (pthread_create(&logThread,&attr,writeLog,(void *) logArgs)) {
-      printf("Error creating log thread.\n");
-      exit(EXIT_FAILURE);
-   }
+void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log) {
 
    execute = 1;
    struct sigaction act;
@@ -256,9 +218,30 @@ int main(int argc, char *argv[]) {
    act.sa_flags = 0;
    sigaction(SIGINT,&act,NULL);
 
+   pthread_mutex_init(&mutexList,NULL);
+
+   struct logThreadArgs *logArgs = calloc(1,sizeof(struct logThreadArgs));
+
+   logArgs->logFile = log;
+   logArgs->msgList = msgList;
+
+   pthread_attr_t attr;
+   pthread_attr_init(&attr);
+   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
+
+   if (pthread_create(logThread,&attr,writeLog,(void *) logArgs)) {
+      printf("Error creating log thread.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   pthread_attr_destroy(&attr);
+}
+
+void handleRequests(struct list *msgList, int listenfd) {
+
    while (execute) {
 
-      connfd = calloc(1,sizeof(int));
+      int *connfd = calloc(1,sizeof(int));
 
       //Abre el socket con el cliente
       *connfd = accept(listenfd, (struct sockaddr*)NULL,NULL);
@@ -274,23 +257,54 @@ int main(int argc, char *argv[]) {
       args->socketfd = *connfd;
       args->msgList = msgList;
 
-      atmThread = calloc(1,sizeof(pthread_t));
+      pthread_t *atmThread = calloc(1,sizeof(pthread_t));
 
       if (pthread_create(atmThread,NULL,receiveMsgs,(void *) args)) {
 
          printf("Error creating thread.\n");
          exit(EXIT_FAILURE);
       }
-   }
 
-   pthread_attr_destroy(&attr);
+   }
+}
+
+
+int main(int argc, char *argv[]) {
+
+   char port[10];
+   char *logPath = calloc(200,sizeof(char));
+
+   serverArguments(argc,argv,port,logPath);
+
+   FILE *log = NULL;
+   int portNum;
+
+   checkArguments(port,logPath,&portNum,&log);
+
+   int listenfd = 0;
+
+   createSocket(&listenfd,portNum);
+
+   // Escucha por un cliente.
+   listen(listenfd, 128);
+
+   struct list *msgList = calloc(1,sizeof(struct list));
+   initializeList(msgList);
+
+   void *status;
+
+   pthread_t logThread;
+
+   initializeServer(&logThread,msgList,log);
+
+   handleRequests(msgList,listenfd);
+
 
    if (pthread_join(logThread,&status))
       printf("Error joining thread.\n");
 
-
    close(listenfd);
-
 
    return 0;
 }
+

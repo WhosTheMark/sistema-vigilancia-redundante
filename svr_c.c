@@ -89,7 +89,30 @@ void clientArguments(int argc, char *argv[], char *domain, char *remotePort, cha
    }
 }
 
-void connectionServer(int *socketfd, struct sockaddr addr) {
+char *createMsg(char *eventMsg) {
+
+   time_t rawtime = time(NULL);
+   struct tm *timeEvent = localtime(&rawtime);
+   char *strTime = asctime(timeEvent);
+   strTime[strlen(strTime)-1] = '\0';
+
+   char *msg = calloc(MSGSIZE,sizeof(char));
+   memset(msg,' ',MSGSIZE*sizeof(char));
+
+   sprintf(msg, "%s, %s",strTime,eventMsg);
+
+   int lengthEvent = strlen(msg);
+   msg[lengthEvent] = ' ';
+   if (msg[lengthEvent-1] == '\n')
+      msg[lengthEvent-1] = ' ';
+   msg[MSGSIZE-1] = '\0';
+   printf("Message: %s\n", msg);
+
+   return msg;
+
+}
+
+void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventList) {
 
    int numTries;
 
@@ -103,6 +126,13 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
          break;
 
       if (numTries % 10 == 0) {
+
+         char *msg = createMsg("communication offline");
+
+         pthread_mutex_lock(&mutexList);
+         addElement(msg,eventList);
+         pthread_mutex_unlock(&mutexList);
+
          printf("Connection to server failed. Trying again in 30 seconds.\n");
          sleep(30);
       }
@@ -110,6 +140,9 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
 
    if (numTries == -1) {
       printf("Connection to server failed.\n");
+
+      //TODO SEND EMAIL
+
       exit(EXIT_FAILURE);
    }
 
@@ -117,8 +150,6 @@ void connectionServer(int *socketfd, struct sockaddr addr) {
 }
 
 void createSocket(char *remotePort, int *sockfd, char *domain, struct sockaddr *addr) {
-
-   //NOTE agregar archivo para eventos del ATM
 
    struct addrinfo hints, *servInfo, *p;
 
@@ -150,7 +181,7 @@ void reconnect(int *socketfd, char *remotePort, char *domain, char *event, struc
    printf("Server was down. Reconnecting...\n");
 
    createSocket(remotePort,socketfd,domain,&addr);
-   connectionServer(socketfd,addr);
+   connectionServer(socketfd,addr,eventList);
 
    pthread_mutex_lock(&mutexList);
    restoreBackup(eventList);
@@ -173,11 +204,9 @@ void sendEventsHelper(char *remotePort, char *domain, int *socketfd, struct list
       int numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
       int numTries = 0;
 
-      //ERRORS
 
       if (errno == EPIPE) { // para cuando hay un broken pipe, reestablecer la conexion
 
-         //TODO FIRST LOST MSG IS LOST FOREVER :(
          reconnect(socketfd,remotePort,domain,event,eventList);
 
       } else if (numBytes == -1) {
@@ -215,7 +244,7 @@ void *sendEvents(void *sendArgs) {
    struct sockaddr addr;
 
    createSocket(remotePort,&socketfd,domain,&addr);
-   connectionServer(&socketfd,addr);
+   connectionServer(&socketfd,addr,eventList);
 
    while (execute) {
 
@@ -231,6 +260,8 @@ void *sendEvents(void *sendArgs) {
    pthread_exit(NULL);
 }
 
+
+
 void *readEvents(void *eList) {
 
    struct list *eventList = (struct list *) eList;
@@ -244,24 +275,7 @@ void *readEvents(void *eList) {
          break;
       }
 
-      time_t rawtime = time(NULL);
-      struct tm *timeEvent = localtime(&rawtime);
-
-      char *msg = calloc(MSGSIZE,sizeof(char));
-
-      memset(msg,' ',MSGSIZE*sizeof(char));
-
-      char *strTime = asctime(timeEvent);
-
-      strTime[strlen(strTime)-1] = '\0';
-      sprintf(msg, "%s, %s",strTime,eventMsg);
-
-      int lengthEvent = strlen(msg);
-      msg[lengthEvent] = ' ';
-      if (msg[lengthEvent-1] == '\n')
-         msg[lengthEvent-1] = ' ';
-      msg[MSGSIZE-1] = '\0';
-      printf("Message: %s\n", msg);
+      char *msg = createMsg(eventMsg);
 
       pthread_mutex_lock(&mutexList);
       addElement(msg,eventList);
@@ -288,6 +302,33 @@ int portStrToNum(char *portStr) {
    return port;
 }
 
+void intializeClient(pthread_t *sendThread,struct sendThreadArgs sendArgs, struct list *eventList) {
+
+   execute = 1;
+
+   pthread_attr_t attr;
+   pthread_attr_init(&attr);
+   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
+
+   pthread_mutex_init(&mutexList,NULL);
+
+   pthread_t *readThread = calloc(1,sizeof(pthread_t));
+
+
+   if (pthread_create(readThread,NULL,readEvents,(void *) eventList)) {
+
+      printf("Error creating read thread.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   if (pthread_create(sendThread,&attr,sendEvents,(void *) &sendArgs)) {
+
+      printf("Error creating send thread.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   pthread_attr_destroy(&attr);
+}
 
 int main(int argc, char *argv[]) {
 
@@ -300,25 +341,10 @@ int main(int argc, char *argv[]) {
    struct list eventList;
    initializeList(&eventList);
 
-   int success = 0;
+   char *msg = createMsg("application started");
+   addElement(msg,&eventList);
+
    void *status;
-
-   execute = 1;
-
-   pthread_attr_t attr;
-   pthread_attr_init(&attr);
-   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
-
-   pthread_mutex_init(&mutexList,NULL);
-
-   pthread_t *readThread = calloc(1,sizeof(pthread_t));
-   pthread_t *sendThread = calloc(1,sizeof(pthread_t));
-
-   if (pthread_create(readThread,NULL,readEvents,(void *) &eventList)) {
-
-      printf("Error creating read thread.\n");
-      exit(EXIT_FAILURE);
-   }
 
    struct sendThreadArgs sendArgs;
 
@@ -326,16 +352,12 @@ int main(int argc, char *argv[]) {
    sendArgs.domain = domain;
    sendArgs.eventList = &eventList;
 
-   if (pthread_create(sendThread,&attr,sendEvents,(void *) &sendArgs)) {
+   pthread_t *sendThread = calloc(1,sizeof(pthread_t));
 
-      printf("Error creating send thread.\n");
-      exit(EXIT_FAILURE);
-   }
+   intializeClient(sendThread,sendArgs,&eventList);
 
    while (execute)
       sleep(2);
-
-   pthread_attr_destroy(&attr);
 
    if (pthread_join(*sendThread,&status))
       printf("Error joining thread.\n");
