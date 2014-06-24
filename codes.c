@@ -1,11 +1,25 @@
+/**
+ * @file codes.c
+ * @author Marcos Campos 10-10108 
+ * @author Andrea Salcedo 10-10666
+ * @date 23 Jun 2014
+ * @brief Archivo que contiene funciones para devolver el codigo de un evento.
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <regex.h>
 #include <string.h>
-#define MSGSIZE_CODE 200
-#define DATESIZE 26
 
+/** @brief Tamano del mensaje. */
+#define MSGSIZE_CODE 200 
+/** @brief Tamano de la fecha en el mensaje. */
+#define DATESIZE 26 
 
+/**
+ * @brief Procedimiento que elimina los espacios en blanco de un string.
+ * @param str String a modificar.
+ */
 void rmWhiteSpaces(char *str) {
 
    int i;
@@ -15,6 +29,14 @@ void rmWhiteSpaces(char *str) {
    str[i+1] = '\0';
 }
 
+/**
+ * @brief Funcion que verifica si el mensaje cumple con la expresion regular.
+ * @param regexStr La expresion regular.
+ * @param msg Mensaje a verificar.
+ * @retval 0 El mensaje no cumple con la expresion regular.
+ * @retval 1 El mensaje cumple con la expresion regular.
+ */
+  
 int cmpRegex(char *regexStr, char *msg) {
 
    regex_t regex;
@@ -31,7 +53,12 @@ int cmpRegex(char *regexStr, char *msg) {
    return 0;
 }
 
-
+/**
+ * @brief Devuelve el codigo del evento asociado a un mensaje.
+ * @param originalMsg Mensaje de un evento.
+ * @retval 0..21 Codigo del evento.
+ * @retval -1 El mensaje no esta asociado a un evento valido.
+ */
 int getCode(char *originalMsg) {
 
    char **validMsgs = (char *[]) {  "the peripheral device is busy",
@@ -54,12 +81,12 @@ int getCode(char *originalMsg) {
                                     "bottom cassette inserted",
                                     "safe door closed"
                                  };
-
    int i, NUMCODES = 19;
 
-   char *event = originalMsg + DATESIZE;
+   char *event = originalMsg + DATESIZE; //Se elimina la fecha del mensaje original.
    char msg[MSGSIZE_CODE];
 
+   /* Se copia el mensaje en minusculas. */
    for(i = 0; i < strlen(event); ++i)
       msg[i] = tolower(event[i]);
 
@@ -67,25 +94,22 @@ int getCode(char *originalMsg) {
 
    rmWhiteSpaces(msg);
 
-
+   /* Compara el mensaje copiado con los eventos en el arreglo de eventos.
+    * Retorna la posicion (codigo del evento). */
    for(i = 0; i < NUMCODES; ++i) {
 
       if (strcmp(msg,validMsgs[i]) == 0)
          return i;
    }
 
+   /* Si el mensaje no cumplio con ninguno de los eventos en el arreglo, entonces
+    * se verifica si cumple con una de las siguientes expresiones regulares. */
+   
    if (cmpRegex("^running out of notes in cassette [[:digit:]][[:digit:]]*$",msg))
       return NUMCODES;
 
    if (cmpRegex("^cassette [[:digit:]][[:digit:]]* empty$",msg))
       return ++NUMCODES;
 
-   return -1;
+   return -1; //Retorna -1 si el mensaje no esta asociado un evento valido.
 }
-/*
-int main () {
-
-
-   printf("code: %d", getCode("Sun Jun 22 02:07:40 2014, low cash alert"));
-}
-*/
