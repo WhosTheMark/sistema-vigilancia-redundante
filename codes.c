@@ -82,6 +82,7 @@ int getCode(char *originalMsg) {
                                     "safe door closed"
                                  };
    int i, NUMCODES = 19;
+   
 
    char *event = originalMsg + DATESIZE; //Se elimina la fecha del mensaje original.
    char msg[MSGSIZE_CODE];
@@ -112,4 +113,14 @@ int getCode(char *originalMsg) {
       return ++NUMCODES;
 
    return -1; //Retorna -1 si el mensaje no esta asociado un evento valido.
+}
+
+   //8 9 20 10 12 14  16
+int needAlert(int code) {
+
+   if (code == 8 || code == 9 || code == 10 || code == 12 ||
+       code == 14 || code == 16 || code == 20)
+      return 1;
+   
+   return 0;   
 }

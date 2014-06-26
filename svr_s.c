@@ -29,6 +29,9 @@
 /** @brief Semaforo que maneja la lista de los mensajes recibidos. */
 pthread_mutex_t mutexList;
 
+/** @brief Semaforo que maneja la lista de los correos que debe mandar el servidor. */
+pthread_mutex_t mutexEmail;
+
 /** @brief Global para determinar si se debe cerra el servidor. */
 int execute;
 
@@ -37,6 +40,7 @@ struct atmThreadArgs {
 
    int socketfd; /**< El file descriptor del socket asociado al ATM atendido.*/
    struct list *msgList; /**< Lista de los mensajes recibidos. */
+   struct list *emailList; /**< Lista de los correos a enviar. */   
 };
 
 /** @brief Argumentos del hilo que escribe en la bitacora. */
@@ -44,6 +48,13 @@ struct logThreadArgs {
 
    FILE *logFile; /**< Archivo de la bitacora. */
    struct list *msgList; /**< Lista de los mensajes recibos por el servidor. */
+};
+
+/** @brief Argumentos del hilo que envia correos. */
+struct emailThreadArgs {
+  
+   struct list *emailList; /**< Lista de los correos a enviar. */
+   CURL *curl; /**< Estructura para mandar correos. */
 };
 
 /** @brief Imprime por pantalla como iniciar el servidor. */
@@ -192,6 +203,7 @@ void *receiveMsgs(void *atmArgs) {
    struct atmThreadArgs *args = (struct atmThreadArgs *) atmArgs;
    int socketfd = args->socketfd;
    struct list *msgList = args->msgList;
+   struct list *emailList = args->emailList;
 
    struct sockaddr_in addr;
    int addrLen;
@@ -231,6 +243,13 @@ void *receiveMsgs(void *atmArgs) {
          pthread_mutex_lock(&mutexList);
          addElement(eventMsg,msgList);
          pthread_mutex_unlock(&mutexList);
+         
+         if (needAlert(code)) {
+            
+            pthread_mutex_lock(&mutexEmail);
+            addElement(eventMsg,emailList);
+            pthread_mutex_unlock(&mutexEmail);
+         }
       }
    }
    free(args);
@@ -283,13 +302,51 @@ void *writeLog(void *logArgs) {
    pthread_exit(NULL);
 }
 
+
+void sendEmail(struct list *emailList, CURL *curl) {
+ 
+   while (listSize(emailList) > 0) {
+      pthread_mutex_lock(&mutexEmail);
+      char *msg = getElement(emailList);
+      pthread_mutex_unlock(&mutexEmail);
+      
+      printf("Suspicious pattern found. Sending an email to the supervisor.\n");
+      setMailContent(curl,msg);
+      sendMail(curl);
+   }
+}
+
+
+void *sendEmails(void *emailArgs) {
+ 
+   struct emailThreadArgs *args = (struct emailThreadArgs *) emailArgs;
+   struct list *emailList = args->emailList;
+   CURL *curl = args->curl;
+   
+   while (execute) {
+      
+      while (listSize(emailList) == 0 && execute)
+         sleep(2);
+      
+      sendEmail(emailList,curl);
+   }
+   
+   sendEmail(emailList,curl);
+   
+   free(args);
+   curl_easy_cleanup(curl);
+   pthread_exit(NULL);
+}
+
+
 /**
  * @brief Inicializa el modulo servidor.
  * @param logThread Hilo que maneja la bitacora.
  * @param msgList Lista de los mensajes que recibe el servidor.
  * @param log Archivo de la bitacora.
  */
-void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log) {
+void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log,
+                      pthread_t *emailThread, struct list *emailList, CURL *curl) {
 
    /* Se reemplaza el manejador de interrupciones para que el servidor pueda
     * cerrarse adecuadamente al presionar ctrl+c. */
@@ -300,14 +357,22 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log) {
    act.sa_flags = 0;
    sigaction(SIGINT,&act,NULL);
 
-   /* Inicializacion del metafora para la lista de mensajes recibidos. */
+   /* Inicializacion del semaforo para la lista de mensajes recibidos. */
    pthread_mutex_init(&mutexList,NULL);
+
+    /* Inicializacion del semaforo para la lista de correos a mandar. */
+   pthread_mutex_init(&mutexEmail,NULL);
 
    struct logThreadArgs *logArgs = calloc(1,sizeof(struct logThreadArgs));
 
    logArgs->logFile = log;
    logArgs->msgList = msgList;
-
+   
+   struct emailThreadArgs *emailArgs = calloc(1,sizeof(struct emailThreadArgs));
+   
+   emailArgs->emailList = emailList;
+   emailArgs->curl = curl;
+   
    /* Inicializacion de los atributos del hilo que maneja la 
     * bitacora para que este hilo sea joinable. */
    pthread_attr_t attr;
@@ -316,6 +381,11 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log) {
 
    if (pthread_create(logThread,&attr,writeLog,(void *) logArgs)) {
       printf("Error creating log thread.\n");
+      exit(EXIT_FAILURE);
+   }
+   
+   if (pthread_create(emailThread,&attr,sendEmails,(void *) emailArgs)) {
+      printf("Error creating email thread.\n");
       exit(EXIT_FAILURE);
    }
 
@@ -327,7 +397,7 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log) {
  * @param msgList Lista de los mensajes recibidos por el servidor.
  * @param listenfd El file descriptor del welcoming socket.
  */
-void handleRequests(struct list *msgList, int listenfd) {
+void handleRequests(struct list *msgList, struct list *emailList, int listenfd) {
 
    while (execute) {
 
@@ -348,6 +418,7 @@ void handleRequests(struct list *msgList, int listenfd) {
 
       args->socketfd = connfd;
       args->msgList = msgList;
+      args->emailList = emailList;
 
       pthread_t *atmThread = calloc(1,sizeof(pthread_t));
 
@@ -369,6 +440,14 @@ int main(int argc, char *argv[]) {
 
    char port[10];
    char logPath[200];
+   CURL *curl = curl_easy_init();
+   
+   if (!curl) {   
+      printf("Error creating curl.\n");
+      exit(EXIT_FAILURE);
+   }
+   
+   setMailSettings(curl);
 
    serverArguments(argc,argv,port,logPath);
 
@@ -387,19 +466,28 @@ int main(int argc, char *argv[]) {
     * y la inicializa. */
    struct list *msgList = calloc(1,sizeof(struct list));
    initializeList(msgList);
+   
+   /* Crea una lista para los correos que debe mandar el servidor. */
+   struct list *emailList = calloc(1,sizeof(struct list));
+   initializeList(emailList);
 
    void *status;
 
-   pthread_t logThread;
+   pthread_t logThread, emailThread;
 
-   initializeServer(&logThread,msgList,log); // Inicializa el servidor.
+   /* Inicializa el servidor. */
+   initializeServer(&logThread,msgList,log,&emailThread,emailList,curl); 
 
-   handleRequests(msgList,listenfd); // Maneja las solicitudes de los ATMs.
+   handleRequests(msgList,emailList,listenfd); // Maneja las solicitudes de los ATMs.
 
    /* Espera que termine el hilo encargado de la bitacora antes de cerrar. */
    if (pthread_join(logThread,&status))
       printf("Error joining thread.\n");
 
+   /* Espera que termine el hilo encargado de enviar correos antes de cerrar. */
+   if (pthread_join(emailThread,&status))
+      printf("Error joining thread.\n");
+   
    close(listenfd);
    destroyList(msgList);
    free(msgList);
