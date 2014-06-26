@@ -18,6 +18,8 @@
 #include <limits.h>
 #include <pthread.h>
 #include <signal.h>
+#include <curl/curl.h>
+#include "mail.c"
 #include "codes.c"
 #include "list.h"
 

@@ -19,10 +19,13 @@
 #include <limits.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <curl/curl.h>
+#include <ifaddrs.h>
 #include "list.h"
+#include "mail.c"
 
 /** @brief Numero de intentos que el ATM realiza para volverse conectar al servidor. */
-#define NUMTRIES 199
+#define NUMTRIES 9
 /** @brief Tamano de un evento. */
 #define EVENTSIZE 50
 /** @brief Tamano de un mensaje. */
@@ -41,6 +44,8 @@ struct sendThreadArgs {
    int localPort; /**< El numero de puerto local. */
    char *domain; /**< El nombre del dominio del servidor. */
    struct list *eventList; /**< La lista que contiene los eventos del ATM. */
+   CURL *curl; /**< Estructura para mandar correos. */
+   
 };
 
 /** @brief Imprime por pantalla como iniciar la aplicacion. */
@@ -149,20 +154,41 @@ char *createMsg(char *eventMsg) {
    return msg;
 }
 
+char *getIP() {
+   
+   struct ifaddrs *addrs;
+   
+   if (getifaddrs(&addrs) == -1) {
+      printf("Error getting IP address.\n");
+      return "";
+   }
+   
+   while (addrs) {
+      
+      if (addrs->ifa_addr && addrs->ifa_addr->sa_family == AF_INET) {       
+         struct sockaddr_in *addr = (struct sockaddr_in *) addrs->ifa_addr;
+         return inet_ntoa(addr->sin_addr);
+      }      
+      addrs = addrs->ifa_next;
+   }   
+   return "";   
+}
+
 /**
  * @brief Procedimiento para conectar el ATM con el servidor.
  * @param socketfd El file descriptor del socket ya creado.
  * @param addr Estructura que contiene informacion del socket.
  * @param eventList Lista que almacena los eventos del ATM.
  */
-void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventList) {
+void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventList,
+                      CURL *curl) {
 
    int numTries;
 
    for (numTries = NUMTRIES; numTries > -1; --numTries) {
 
       /* Intenta establecer una conexion al servidor. */
-      if ((connect(*socketfd,&addr, sizeof(addr)) < 0) && numTries > 0){
+      if (connect(*socketfd,&addr, sizeof(addr)) < 0){
          
          printf("Connection to server failed. Trying again...\n");
          sleep(1);
@@ -189,9 +215,15 @@ void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventLis
     * se envia un correo de la falla y se termina el programa. */
    if (numTries == -1) {
       
-      printf("Connection to server failed.\n");
+      printf("Connection to server failed. ");
+      printf("Sending email to supervisor. This may take a few minutes.\n");
 
-      //TODO SEND EMAIL
+      char *ipAddr = getIP(), message[MSGSIZE];
+            
+      sprintf(message,"IP: %s, Message: %s.",ipAddr,"Connection to server failed"); 
+      
+      setMailContent(curl,message);
+      sendMail(curl);
       
       exit(EXIT_FAILURE);
    }
@@ -264,7 +296,7 @@ void createSocket(char *remotePort, int localPort, int *socketfd,
  * @param eventList La lista con los eventos realizados en el ATM.
  */  
 void reconnect(int *socketfd, char *remotePort, int localPort, char *domain, 
-               char *event, struct list *eventList) {
+               char *event, struct list *eventList, CURL *curl) {
 
    close(*socketfd); //Cierra el file descriptor actual.
    
@@ -273,7 +305,7 @@ void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
 
    /* Crea nuevamente un socket e intenta conectarse al servidor. */
    createSocket(remotePort,localPort,socketfd,domain,&addr);
-   connectionServer(socketfd,addr,eventList);
+   connectionServer(socketfd,addr,eventList,curl);
 
    /* Se recupara el penultimo evento respaldado en la lista 
     * y se agrega el ultimo evento a lista. */
@@ -293,7 +325,7 @@ void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
  * @param eventList La lista con los eventos realizados en el ATM.
  */
 void sendEventsHelper(char *remotePort, int localPort, char *domain, 
-                      int *socketfd, struct list *eventList) {
+                      int *socketfd, struct list *eventList, CURL *curl) {
 
    char *event;
 
@@ -311,7 +343,7 @@ void sendEventsHelper(char *remotePort, int localPort, char *domain,
       /* Si se intenta de enviar el evento y pipe esta roto entonces se 
        * intenta de restablecer la conexion. */
       if (errno == EPIPE) { 
-         reconnect(socketfd,remotePort,localPort,domain,event,eventList);
+         reconnect(socketfd,remotePort,localPort,domain,event,eventList,curl);
 
       /* Si existe otro error al enviar el evento entonces se sigue 
        * intentando de enviar un maximo de 10 veces. */
@@ -331,7 +363,7 @@ void sendEventsHelper(char *remotePort, int localPort, char *domain,
          /* Si el ATM no pudo enviar el mensaje despues de 10 intentos 
           * entonces intenta de restablecer la conexion con el servidor.*/
          if (numTries == 10) 
-            reconnect(socketfd,remotePort,localPort,domain,event,eventList);
+            reconnect(socketfd,remotePort,localPort,domain,event,eventList,curl);
          
       }
    }
@@ -353,13 +385,14 @@ void *sendEvents(void *sendArgs) {
    int localPort = args->localPort;
    char *domain = args->domain;
    struct list *eventList = args->eventList;
+   CURL *curl = args->curl;
 
    int socketfd;
    struct sockaddr addr;
 
    /* Crea el socket y se conecta al servidor. */
    createSocket(remotePort,localPort,&socketfd,domain,&addr);
-   connectionServer(&socketfd,addr,eventList);
+   connectionServer(&socketfd,addr,eventList,curl);
 
    while (execute) {
 
@@ -367,13 +400,13 @@ void *sendEvents(void *sendArgs) {
          sleep(2);
 
       /* Se envian los elementos que estan almacenados en la lista. */
-      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList);
+      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList,curl);
    }
 
    /* Si al salirse del programa, todavia hay eventos almacenados en la lista
     * entonces se mandan y luego se cierra el hilo. */
    if (listSize(eventList) > 0)
-      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList);
+      sendEventsHelper(remotePort,localPort,domain,&socketfd,eventList,curl);
 
    pthread_exit(NULL);
 }
@@ -480,6 +513,15 @@ int main(int argc, char *argv[]) {
    char *remotePort = calloc(10,sizeof(char));
    char *localPort = calloc(10,sizeof(char));
 
+   CURL *curl = curl_easy_init();
+   
+   if (!curl) {   
+      printf("Error creating curl.\n");
+      exit(EXIT_FAILURE);
+   }
+   
+   setMailSettings(curl);
+   
    /* Verifica los argumentos. */
    clientArguments(argc,argv,domain,remotePort,localPort);
 
@@ -502,6 +544,7 @@ int main(int argc, char *argv[]) {
    sendArgs.localPort = localPortNum;
    sendArgs.domain = domain;
    sendArgs.eventList = &eventList;
+   sendArgs.curl = curl;
 
    pthread_t *readThread = calloc(1,sizeof(pthread_t));
    pthread_t *sendThread = calloc(1,sizeof(pthread_t));
@@ -522,6 +565,7 @@ int main(int argc, char *argv[]) {
    free(remotePort);
    free(localPort);
    destroyList(&eventList);
+   curl_easy_cleanup(curl);
 
    return 0;
 }
