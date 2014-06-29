@@ -222,7 +222,7 @@ void *receiveMsgs(void *atmArgs) {
 
          char *eventMsg = calloc(200,sizeof(char));
          
-         sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
+         sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s",ipAddr,code,msg);
          printf("%s\n",eventMsg);
 
          /* Almacena el mensaje del evento en la lista de mensajes recibidos.*/
