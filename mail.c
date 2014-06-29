@@ -99,6 +99,9 @@ void setMailContent(CURL *curl, char* msg){
 void sendMail(CURL *curl){
    
    CURLcode res = CURLE_OK;
+   
+   //curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+   
    /* Send the message */
    res = curl_easy_perform(curl);
 

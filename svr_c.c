@@ -307,11 +307,14 @@ void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
    createSocket(remotePort,localPort,socketfd,domain,&addr);
    connectionServer(socketfd,addr,eventList,curl);
 
+   char *eventCpy = calloc(MSGSIZE,sizeof(char));
+   strcpy(eventCpy,event);
+   
    /* Se recupara el penultimo evento respaldado en la lista 
     * y se agrega el ultimo evento a lista. */
    pthread_mutex_lock(&mutexList);
+   addElement(eventCpy,eventList);
    restoreBackup(eventList);
-   addElement(event,eventList);
    pthread_mutex_unlock(&mutexList);
 
 }

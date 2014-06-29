@@ -236,7 +236,7 @@ void *receiveMsgs(void *atmArgs) {
 
          char *eventMsg = calloc(200,sizeof(char));
          
-         sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s.",ipAddr,code,msg);
+         sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s",ipAddr,code,msg);
          printf("%s\n",eventMsg);
 
          /* Almacena el mensaje del evento en la lista de mensajes recibidos.*/
@@ -302,7 +302,11 @@ void *writeLog(void *logArgs) {
    pthread_exit(NULL);
 }
 
-
+/**
+ * @brief Procedimiento para enviar correos.
+ * @param emailList Lista de mensajes a enviar por correo.
+ * @param curl Estructura para mandar correos.
+ */
 void sendEmail(struct list *emailList, CURL *curl) {
  
    while (listSize(emailList) > 0) {
@@ -316,7 +320,12 @@ void sendEmail(struct list *emailList, CURL *curl) {
    }
 }
 
-
+/**
+ * @brief Procedimiento del hilo que envia correos.
+ * @param emailArgs Argumentos del hilo.
+ * <br> emailList - Lista que contiene los mensajes a enviar por correo.
+ * <br> curl - Estructura para mandar correos.
+ */
 void *sendEmails(void *emailArgs) {
  
    struct emailThreadArgs *args = (struct emailThreadArgs *) emailArgs;
@@ -329,15 +338,13 @@ void *sendEmails(void *emailArgs) {
          sleep(2);
       
       sendEmail(emailList,curl);
-   }
-   
+   }   
    sendEmail(emailList,curl);
    
    free(args);
    curl_easy_cleanup(curl);
    pthread_exit(NULL);
 }
-
 
 /**
  * @brief Inicializa el modulo servidor.
