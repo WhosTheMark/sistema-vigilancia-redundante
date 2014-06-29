@@ -1,6 +1,6 @@
 /**
  * @file svr_c.c
- * @author Marcos Campos 10-10108 
+ * @author Marcos Campos 10-10108
  * @author Andrea Salcedo 10-10666
  * @date 23 Jun 2014
  * @brief Archivo con las funcionalidades del ATM en el SVR.
@@ -25,7 +25,7 @@
 #include "mail.c"
 
 /** @brief Numero de intentos que el ATM realiza para volverse conectar al servidor. */
-#define NUMTRIES 9
+#define NUMTRIES 199
 /** @brief Tamano de un evento. */
 #define EVENTSIZE 50
 /** @brief Tamano de un mensaje. */
@@ -45,7 +45,7 @@ struct sendThreadArgs {
    char *domain; /**< El nombre del dominio del servidor. */
    struct list *eventList; /**< La lista que contiene los eventos del ATM. */
    CURL *curl; /**< Estructura para mandar correos. */
-   
+
 };
 
 /** @brief Imprime por pantalla como iniciar la aplicacion. */
@@ -64,7 +64,7 @@ void usage() {
  * @param remotePort String donde se almacena el puerto remoto del servidor.
  * @param localPort String donde se almacena el puerto local.
  */
-void clientArguments(int argc, char *argv[], char *domain, 
+void clientArguments(int argc, char *argv[], char *domain,
                      char *remotePort, char *localPort) {
 
    int flagD = 0, flagP = 0, flagL = 0;
@@ -132,7 +132,7 @@ char *createMsg(char *eventMsg) {
 
    time_t rawtime = time(NULL);
    struct tm *timeEvent = localtime(&rawtime);
-   
+
    char *strTime = asctime(timeEvent);
    strTime[strlen(strTime)-1] = '\0';
 
@@ -143,35 +143,39 @@ char *createMsg(char *eventMsg) {
 
    int lengthEvent = strlen(msg);
    msg[lengthEvent] = ' ';
-   
+
    /* Elimina el salto de linea al final del mensaje y se agrega \0. */
    if (msg[lengthEvent-1] == '\n')
       msg[lengthEvent-1] = ' ';
    msg[MSGSIZE-1] = '\0';
-   
+
    printf("Message to send: %s\n", msg);
 
    return msg;
 }
 
+/**
+ * @brief Obtiene el IP de la maquina.
+ * @return String del IP de la maquina.
+ */
 char *getIP() {
-   
+
    struct ifaddrs *addrs;
-   
+
    if (getifaddrs(&addrs) == -1) {
       printf("Error getting IP address.\n");
       return "";
    }
-   
+
    while (addrs) {
-      
-      if (addrs->ifa_addr && addrs->ifa_addr->sa_family == AF_INET) {       
+
+      if (addrs->ifa_addr && addrs->ifa_addr->sa_family == AF_INET) {
          struct sockaddr_in *addr = (struct sockaddr_in *) addrs->ifa_addr;
          return inet_ntoa(addr->sin_addr);
-      }      
+      }
       addrs = addrs->ifa_next;
-   }   
-   return "";   
+   }
+   return "";
 }
 
 /**
@@ -179,6 +183,7 @@ char *getIP() {
  * @param socketfd El file descriptor del socket ya creado.
  * @param addr Estructura que contiene informacion del socket.
  * @param eventList Lista que almacena los eventos del ATM.
+ * @param curl Estructura para enviar correos.
  */
 void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventList,
                       CURL *curl) {
@@ -189,7 +194,7 @@ void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventLis
 
       /* Intenta establecer una conexion al servidor. */
       if (connect(*socketfd,&addr, sizeof(addr)) < 0){
-         
+
          printf("Connection to server failed. Trying again...\n");
          sleep(1);
       } else
@@ -214,17 +219,17 @@ void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventLis
    /* Si el ATM no se puede conectar despues del maximo numero de intentos,
     * se envia un correo de la falla y se termina el programa. */
    if (numTries == -1) {
-      
+
       printf("Connection to server failed. ");
       printf("Sending email to supervisor. This may take a few minutes.\n");
 
       char *ipAddr = getIP(), message[MSGSIZE];
-            
-      sprintf(message,"IP: %s, Message: %s.",ipAddr,"Connection to server failed"); 
-      
+
+      sprintf(message,"IP: %s, Message: %s.",ipAddr,"Connection to server failed");
+
       setMailContent(curl,message);
       sendMail(curl);
-      
+
       exit(EXIT_FAILURE);
    }
 
@@ -239,7 +244,7 @@ void connectionServer(int *socketfd, struct sockaddr addr, struct list *eventLis
  * @param domain El dominio/IP del servidor.
  * @param addr Estructura donde se almacena informacion pertinente al socket.
  */
-void createSocket(char *remotePort, int localPort, int *socketfd, 
+void createSocket(char *remotePort, int localPort, int *socketfd,
                   char *domain, struct sockaddr *addr) {
 
    struct addrinfo hints, *servInfo, *p;
@@ -253,7 +258,7 @@ void createSocket(char *remotePort, int localPort, int *socketfd,
       printf("%s is not a valid domain.\n",domain);
       exit(EXIT_FAILURE);
    }
-   
+
    /* Si no se puede crear el socket, se termina el programa. */
    if ((*socketfd = socket(servInfo->ai_family, servInfo->ai_socktype,
       servInfo->ai_protocol)) == -1) {
@@ -264,7 +269,7 @@ void createSocket(char *remotePort, int localPort, int *socketfd,
 
    *addr = *(servInfo->ai_addr);
 
-   /* Si se ingreso un puerto local al iniciar el modulo cliente, 
+   /* Si se ingreso un puerto local al iniciar el modulo cliente,
     * entonces se asocia al socket creado. */
    if (localPort != -1) {
 
@@ -276,7 +281,7 @@ void createSocket(char *remotePort, int localPort, int *socketfd,
 
       bind(*socketfd, (struct sockaddr *)&localAddr, sizeof(localAddr));
 
-      /* Si el puerto local dado ya se esta utilizando, 
+      /* Si el puerto local dado ya se esta utilizando,
        * se termina el programa. */
       if (errno == EADDRINUSE) {
          printf("Error: port #%d is already in use.\n",localPort);
@@ -294,12 +299,13 @@ void createSocket(char *remotePort, int localPort, int *socketfd,
  * @param domain El dominio/IP del servidor.
  * @param event El ultimo evento realizado en el ATM antes de caerse la conexion.
  * @param eventList La lista con los eventos realizados en el ATM.
- */  
-void reconnect(int *socketfd, char *remotePort, int localPort, char *domain, 
+ * @param curl Estructura para enviar correos.
+ */
+void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
                char *event, struct list *eventList, CURL *curl) {
 
    close(*socketfd); //Cierra el file descriptor actual.
-   
+
    struct sockaddr addr;
    printf("Server was down. Reconnecting...\n");
 
@@ -309,8 +315,8 @@ void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
 
    char *eventCpy = calloc(MSGSIZE,sizeof(char));
    strcpy(eventCpy,event);
-   
-   /* Se recupara el penultimo evento respaldado en la lista 
+
+   /* Se recupara el penultimo evento respaldado en la lista
     * y se agrega el ultimo evento a lista. */
    pthread_mutex_lock(&mutexList);
    addElement(eventCpy,eventList);
@@ -326,8 +332,9 @@ void reconnect(int *socketfd, char *remotePort, int localPort, char *domain,
  * @param domain El dominio/IP del servidor.
  * @param socketfd El file descriptor del socket conectado con el servidor.
  * @param eventList La lista con los eventos realizados en el ATM.
+ * @param curl Estructura para enviar correos.
  */
-void sendEventsHelper(char *remotePort, int localPort, char *domain, 
+void sendEventsHelper(char *remotePort, int localPort, char *domain,
                       int *socketfd, struct list *eventList, CURL *curl) {
 
    char *event;
@@ -340,15 +347,15 @@ void sendEventsHelper(char *remotePort, int localPort, char *domain,
 
       int numTries = 0;
       errno = 0;
-      
+
       int numBytes = send(*socketfd,event,strlen(event),MSG_NOSIGNAL);
 
-      /* Si se intenta de enviar el evento y pipe esta roto entonces se 
+      /* Si se intenta de enviar el evento y pipe esta roto entonces se
        * intenta de restablecer la conexion. */
-      if (errno == EPIPE) { 
+      if (errno == EPIPE) {
          reconnect(socketfd,remotePort,localPort,domain,event,eventList,curl);
 
-      /* Si existe otro error al enviar el evento entonces se sigue 
+      /* Si existe otro error al enviar el evento entonces se sigue
        * intentando de enviar un maximo de 10 veces. */
       } else if (numBytes == -1) {
 
@@ -363,11 +370,11 @@ void sendEventsHelper(char *remotePort, int localPort, char *domain,
             sleep(1);
          }
 
-         /* Si el ATM no pudo enviar el mensaje despues de 10 intentos 
+         /* Si el ATM no pudo enviar el mensaje despues de 10 intentos
           * entonces intenta de restablecer la conexion con el servidor.*/
-         if (numTries == 10) 
+         if (numTries == 10)
             reconnect(socketfd,remotePort,localPort,domain,event,eventList,curl);
-         
+
       }
    }
 }
@@ -379,7 +386,7 @@ void sendEventsHelper(char *remotePort, int localPort, char *domain,
  * <br> localPort - El numero de puerto local.
  * <br> domain - Dominio/IP del servidor.
  * <br> evenList - La lista de los eventos realizados por el cliente.
- */ 
+ */
 void *sendEvents(void *sendArgs) {
 
    struct sendThreadArgs *args = (struct sendThreadArgs *) sendArgs;
@@ -421,7 +428,7 @@ void *sendEvents(void *sendArgs) {
 void *readEvents(void *eList) {
 
    struct list *eventList = (struct list *) eList;
-   
+
    int lenEvent = EVENTSIZE;
    char *eventMsg = calloc(EVENTSIZE,sizeof(char));
 
@@ -481,7 +488,7 @@ void intializeClient(pthread_t *readThread, pthread_t *sendThread,
 
    execute = 1;
 
-   /* Inicializacion de los atributos de sendThread 
+   /* Inicializacion de los atributos de sendThread
     * para que este hilo sea joinable. */
    pthread_attr_t attr;
    pthread_attr_init(&attr);
@@ -517,14 +524,14 @@ int main(int argc, char *argv[]) {
    char *localPort = calloc(10,sizeof(char));
 
    CURL *curl = curl_easy_init();
-   
-   if (!curl) {   
+
+   if (!curl) {
       printf("Error creating curl.\n");
       exit(EXIT_FAILURE);
    }
-   
+
    setMailSettings(curl);
-   
+
    /* Verifica los argumentos. */
    clientArguments(argc,argv,domain,remotePort,localPort);
 

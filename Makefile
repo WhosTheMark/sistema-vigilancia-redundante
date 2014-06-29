@@ -1,4 +1,4 @@
-all: client server
+all: client server twitter
 
 client: svr_c.o list.o mail.o
 	gcc -pthread svr_c.o -o svr_c -lcurl
@@ -21,5 +21,8 @@ codes.o: codes.c
 mail.o: mail.c
 	gcc -c mail.c -lcurl
 
+twitter: twitter.cpp
+	g++ twitter.cpp -o twitter -ltwitcurl
+
 clean:
-	rm -rf *.o svr_c svr_s
+	rm -rf *.o svr_c svr_s twitter

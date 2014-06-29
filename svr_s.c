@@ -1,6 +1,6 @@
 /**
  * @file svr_s.c
- * @author Marcos Campos 10-10108 
+ * @author Marcos Campos 10-10108
  * @author Andrea Salcedo 10-10666
  * @date 23 Jun 2014
  * @brief Archivo que contiene las funcionalidades del servidor del SVR.
@@ -26,6 +26,9 @@
 /** @brief Tamano maximo de un mensaje */
 #define MSGSIZE 80
 
+/** @brief Invoca el programa para enviar tweets. */
+#define TWITTER_CMD "./twitter"
+
 /** @brief Semaforo que maneja la lista de los mensajes recibidos. */
 pthread_mutex_t mutexList;
 
@@ -40,7 +43,7 @@ struct atmThreadArgs {
 
    int socketfd; /**< El file descriptor del socket asociado al ATM atendido.*/
    struct list *msgList; /**< Lista de los mensajes recibidos. */
-   struct list *emailList; /**< Lista de los correos a enviar. */   
+   struct list *emailList; /**< Lista de los correos a enviar. */
 };
 
 /** @brief Argumentos del hilo que escribe en la bitacora. */
@@ -52,7 +55,7 @@ struct logThreadArgs {
 
 /** @brief Argumentos del hilo que envia correos. */
 struct emailThreadArgs {
-  
+
    struct list *emailList; /**< Lista de los correos a enviar. */
    CURL *curl; /**< Estructura para mandar correos. */
 };
@@ -66,8 +69,8 @@ void usage() {
 
 /**
  * @brief Manejador de interrupciones para cerrar el servidor.
- * Cambia el valor de la global execute a 0 para que el servidor pueda 
- * cerrar los procesos y liberar memoria antes de terminar. 
+ * Cambia el valor de la global execute a 0 para que el servidor pueda
+ * cerrar los procesos y liberar memoria antes de terminar.
  * @param signum El numero de la interrupcion.
  */
 void terminateHandler(int signum) {
@@ -211,7 +214,7 @@ void *receiveMsgs(void *atmArgs) {
    addr.sin_family = AF_INET;
    addrLen = sizeof(addr);
    addr.sin_addr.s_addr = 0L;
-   
+
    /* Obtiene el IP del ATM al cual esta atendiendo.*/
    getpeername(socketfd,(struct sockaddr *)&addr,&addrLen);
 
@@ -235,7 +238,7 @@ void *receiveMsgs(void *atmArgs) {
       if (code != -1) {
 
          char *eventMsg = calloc(200,sizeof(char));
-         
+
          sprintf(eventMsg,"IP: %s, Event Code: %d, Description: %s",ipAddr,code,msg);
          printf("%s\n",eventMsg);
 
@@ -243,9 +246,9 @@ void *receiveMsgs(void *atmArgs) {
          pthread_mutex_lock(&mutexList);
          addElement(eventMsg,msgList);
          pthread_mutex_unlock(&mutexList);
-         
+
          if (needAlert(code)) {
-            
+
             pthread_mutex_lock(&mutexEmail);
             addElement(eventMsg,emailList);
             pthread_mutex_unlock(&mutexEmail);
@@ -292,7 +295,7 @@ void *writeLog(void *logArgs) {
       writeEvent(msgList,logFile);
    }
 
-   /* Antes de cerrar el servidor, el hilo envia los mensajes que 
+   /* Antes de cerrar el servidor, el hilo envia los mensajes que
     * todavia estan en la lista. */
    if (listSize(msgList) > 0)
       writeEvent(msgList,logFile);
@@ -308,13 +311,19 @@ void *writeLog(void *logArgs) {
  * @param curl Estructura para mandar correos.
  */
 void sendEmail(struct list *emailList, CURL *curl) {
- 
+
    while (listSize(emailList) > 0) {
       pthread_mutex_lock(&mutexEmail);
       char *msg = getElement(emailList);
       pthread_mutex_unlock(&mutexEmail);
-      
-      printf("Suspicious pattern found. Sending an email to the supervisor.\n");
+
+      printf("Suspicious pattern found. Sending a tweet and an email to the supervisor.\n");
+
+      /* Se envia tweet llamando el programa hecho en c++. */
+      char command[100];
+      sprintf(command,"%s \"%s\"",TWITTER_CMD,msg);
+      system(command);
+
       setMailContent(curl,msg);
       sendMail(curl);
    }
@@ -327,20 +336,20 @@ void sendEmail(struct list *emailList, CURL *curl) {
  * <br> curl - Estructura para mandar correos.
  */
 void *sendEmails(void *emailArgs) {
- 
+
    struct emailThreadArgs *args = (struct emailThreadArgs *) emailArgs;
    struct list *emailList = args->emailList;
    CURL *curl = args->curl;
-   
+
    while (execute) {
-      
+
       while (listSize(emailList) == 0 && execute)
          sleep(2);
-      
+
       sendEmail(emailList,curl);
-   }   
+   }
    sendEmail(emailList,curl);
-   
+
    free(args);
    curl_easy_cleanup(curl);
    pthread_exit(NULL);
@@ -351,6 +360,9 @@ void *sendEmails(void *emailArgs) {
  * @param logThread Hilo que maneja la bitacora.
  * @param msgList Lista de los mensajes que recibe el servidor.
  * @param log Archivo de la bitacora.
+ * @param emailThread Hilo que maneja los correos a enviar.
+ * @param emailList Lista de los mensajes a mandar por correo.
+ * @param curl Estructura para enviar correos.
  */
 void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log,
                       pthread_t *emailThread, struct list *emailList, CURL *curl) {
@@ -374,13 +386,13 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log,
 
    logArgs->logFile = log;
    logArgs->msgList = msgList;
-   
+
    struct emailThreadArgs *emailArgs = calloc(1,sizeof(struct emailThreadArgs));
-   
+
    emailArgs->emailList = emailList;
    emailArgs->curl = curl;
-   
-   /* Inicializacion de los atributos del hilo que maneja la 
+
+   /* Inicializacion de los atributos del hilo que maneja la
     * bitacora para que este hilo sea joinable. */
    pthread_attr_t attr;
    pthread_attr_init(&attr);
@@ -390,7 +402,7 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log,
       printf("Error creating log thread.\n");
       exit(EXIT_FAILURE);
    }
-   
+
    if (pthread_create(emailThread,&attr,sendEmails,(void *) emailArgs)) {
       printf("Error creating email thread.\n");
       exit(EXIT_FAILURE);
@@ -402,6 +414,7 @@ void initializeServer(pthread_t *logThread, struct list *msgList, FILE *log,
 /**
  * @brief Maneja las solicitudes de los ATMs que desean conectarse al servidor.
  * @param msgList Lista de los mensajes recibidos por el servidor.
+ * @param emailList Lista de los mensajes a enviar por correo.
  * @param listenfd El file descriptor del welcoming socket.
  */
 void handleRequests(struct list *msgList, struct list *emailList, int listenfd) {
@@ -448,12 +461,12 @@ int main(int argc, char *argv[]) {
    char port[10];
    char logPath[200];
    CURL *curl = curl_easy_init();
-   
-   if (!curl) {   
+
+   if (!curl) {
       printf("Error creating curl.\n");
       exit(EXIT_FAILURE);
    }
-   
+
    setMailSettings(curl);
 
    serverArguments(argc,argv,port,logPath);
@@ -473,7 +486,7 @@ int main(int argc, char *argv[]) {
     * y la inicializa. */
    struct list *msgList = calloc(1,sizeof(struct list));
    initializeList(msgList);
-   
+
    /* Crea una lista para los correos que debe mandar el servidor. */
    struct list *emailList = calloc(1,sizeof(struct list));
    initializeList(emailList);
@@ -483,7 +496,7 @@ int main(int argc, char *argv[]) {
    pthread_t logThread, emailThread;
 
    /* Inicializa el servidor. */
-   initializeServer(&logThread,msgList,log,&emailThread,emailList,curl); 
+   initializeServer(&logThread,msgList,log,&emailThread,emailList,curl);
 
    handleRequests(msgList,emailList,listenfd); // Maneja las solicitudes de los ATMs.
 
@@ -494,7 +507,7 @@ int main(int argc, char *argv[]) {
    /* Espera que termine el hilo encargado de enviar correos antes de cerrar. */
    if (pthread_join(emailThread,&status))
       printf("Error joining thread.\n");
-   
+
    close(listenfd);
    destroyList(msgList);
    free(msgList);

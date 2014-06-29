@@ -1,6 +1,6 @@
 /**
  * @file codes.c
- * @author Marcos Campos 10-10108 
+ * @author Marcos Campos 10-10108
  * @author Andrea Salcedo 10-10666
  * @date 23 Jun 2014
  * @brief Archivo que contiene funciones para devolver el codigo de un evento.
@@ -12,9 +12,9 @@
 #include <string.h>
 
 /** @brief Tamano del mensaje. */
-#define MSGSIZE_CODE 200 
+#define MSGSIZE_CODE 200
 /** @brief Tamano de la fecha en el mensaje. */
-#define DATESIZE 26 
+#define DATESIZE 26
 
 /**
  * @brief Procedimiento que elimina los espacios en blanco de un string.
@@ -36,7 +36,7 @@ void rmWhiteSpaces(char *str) {
  * @retval 0 El mensaje no cumple con la expresion regular.
  * @retval 1 El mensaje cumple con la expresion regular.
  */
-  
+
 int cmpRegex(char *regexStr, char *msg) {
 
    regex_t regex;
@@ -82,7 +82,7 @@ int getCode(char *originalMsg) {
                                     "safe door closed"
                                  };
    int i, NUMCODES = 19;
-   
+
 
    char *event = originalMsg + DATESIZE; //Se elimina la fecha del mensaje original.
    char msg[MSGSIZE_CODE];
@@ -105,7 +105,7 @@ int getCode(char *originalMsg) {
 
    /* Si el mensaje no cumplio con ninguno de los eventos en el arreglo, entonces
     * se verifica si cumple con una de las siguientes expresiones regulares. */
-   
+
    if (cmpRegex("^running out of notes in cassette [[:digit:]][[:digit:]]*$",msg))
       return NUMCODES;
 
@@ -115,12 +115,17 @@ int getCode(char *originalMsg) {
    return -1; //Retorna -1 si el mensaje no esta asociado un evento valido.
 }
 
-   //8 9 20 10 12 14  16
+/**
+ * @brief Verifica si el mensaje se debe mandar por correo.
+ * @param code Codigo del mensaje.
+ * @retval 0 No se debe enviar un correo.
+ * @retval 1 Se debe enviar un correo. (Codigos: 8, 9, 10, 12, 14, 16, 20)
+ */
 int needAlert(int code) {
 
    if (code == 8 || code == 9 || code == 10 || code == 12 ||
        code == 14 || code == 16 || code == 20)
       return 1;
-   
-   return 0;   
+
+   return 0;
 }
