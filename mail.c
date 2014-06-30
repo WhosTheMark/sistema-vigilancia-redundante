@@ -29,7 +29,7 @@
 struct upload_status upload_ctx;
 
 /** @brief Estructura basica del correo a enviar. */
-static  char *payload_text[] = {
+static const char *payload_text[] = {
    "Date: Mon, 30 Jun 2014 21:54:29 +1100\r\n",
    "To: " TO "\r\n",
    "From: " FROM "RedBank\r\n",

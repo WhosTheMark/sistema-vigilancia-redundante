@@ -1,6 +1,19 @@
-the peripheral device is busy
-response of device not completely received
-device asked for termination
-application started
-ports verification
-communication offline
+the peripheral device is busy 
+response of device not completely received 
+device asked for termination 
+application started 
+ports verification 
+communication offline 
+device status change 
+low cash alert 
+service mode entered 
+safe door opened 
+top cassette removed 
+top cassette inserted 
+second cassette removed 
+second cassette inserted 
+third cassette removed 
+third cassette inserted 
+bottom cassette removed 
+bottom cassette inserted 
+safe door closed 

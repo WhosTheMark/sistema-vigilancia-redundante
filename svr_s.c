@@ -248,9 +248,12 @@ void *receiveMsgs(void *atmArgs) {
          pthread_mutex_unlock(&mutexList);
 
          if (needAlert(code)) {
-
+            
+            char *emailMsg = calloc(200,sizeof(char));
+            strcpy(emailMsg,eventMsg);
+            
             pthread_mutex_lock(&mutexEmail);
-            addElement(eventMsg,emailList);
+            addElement(emailMsg,emailList);
             pthread_mutex_unlock(&mutexEmail);
          }
       }
@@ -300,8 +303,8 @@ void *writeLog(void *logArgs) {
    if (listSize(msgList) > 0)
       writeEvent(msgList,logFile);
 
-   free(args);
    fclose(logFile);
+   free(args);
    pthread_exit(NULL);
 }
 
@@ -320,7 +323,7 @@ void sendEmail(struct list *emailList, CURL *curl) {
       printf("Suspicious pattern found. Sending a tweet and an email to the supervisor.\n");
 
       /* Se envia tweet llamando el programa hecho en c++. */
-      char command[100];
+      char command[210];
       sprintf(command,"%s \"%s\"",TWITTER_CMD,msg);
       system(command);
 
